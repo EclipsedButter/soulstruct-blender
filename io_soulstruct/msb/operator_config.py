@@ -6,7 +6,7 @@ __all__ = [
     "BLENDER_MSB_EVENT_TYPES",
 ]
 
-from io_soulstruct.msb import darksouls1ptde, darksouls1r, demonssouls
+from io_soulstruct.msb import darksouls1ptde, darksouls1r
 from soulstruct.games import *
 from .properties import MSBPartSubtype, MSBRegionSubtype, MSBEventSubtype
 
@@ -29,16 +29,6 @@ BLENDER_MSB_PART_TYPES = {
         MSBPartSubtype.Collision: darksouls1r.BlenderMSBCollision,
         MSBPartSubtype.Navmesh: darksouls1r.BlenderMSBNavmesh,
         MSBPartSubtype.ConnectCollision: darksouls1r.BlenderMSBConnectCollision,
-    },
-    DEMONS_SOULS: {
-        MSBPartSubtype.MapPiece: demonssouls.BlenderMSBMapPiece,
-        MSBPartSubtype.Object: demonssouls.BlenderMSBObject,
-        MSBPartSubtype.Character: demonssouls.BlenderMSBCharacter,
-        MSBPartSubtype.PlayerStart: demonssouls.BlenderMSBPlayerStart,
-        MSBPartSubtype.Collision: demonssouls.BlenderMSBCollision,
-        MSBPartSubtype.Protoboss: demonssouls.BlenderMSBProtoboss,
-        MSBPartSubtype.Navmesh: demonssouls.BlenderMSBNavmesh,
-        MSBPartSubtype.ConnectCollision: demonssouls.BlenderMSBConnectCollision,
     },
 }
 
@@ -85,14 +75,5 @@ BLENDER_MSB_EVENT_TYPES = {
         MSBEventSubtype.Navigation: darksouls1r.BlenderMSBNavigationEvent,
         MSBEventSubtype.Environment: darksouls1r.BlenderMSBEnvironmentEvent,
         MSBEventSubtype.NPCInvasion: darksouls1r.BlenderMSBNPCInvasionEvent,
-    },
-    DEMONS_SOULS: {
-        MSBEventSubtype.Light: demonssouls.BlenderMSBLightEvent,
-        MSBEventSubtype.Sound: demonssouls.BlenderMSBSoundEvent,
-        MSBEventSubtype.VFX: demonssouls.BlenderMSBVFXEvent,
-        MSBEventSubtype.Wind: demonssouls.BlenderMSBWindEvent,
-        MSBEventSubtype.Treasure: demonssouls.BlenderMSBTreasureEvent,
-        MSBEventSubtype.Spawner: demonssouls.BlenderMSBSpawnerEvent,
-        MSBEventSubtype.Message: demonssouls.BlenderMSBMessageEvent,
     },
 }

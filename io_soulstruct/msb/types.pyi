@@ -17,11 +17,7 @@ from soulstruct.base.maps.msb import MSB as BaseMSB, MSBEntry
 from soulstruct.base.maps.msb.events import BaseMSBEvent
 from soulstruct.base.maps.msb.parts import BaseMSBPart
 from soulstruct.base.maps.msb.regions import BaseMSBRegion
-from soulstruct.base.maps.msb.region_shapes import RegionShapeType
-from .properties import MSBPartSubtype, MSBRegionSubtype, MSBEventSubtype
-
-
-# TODO: These should be Protocols.
+from .properties import MSBPartSubtype, MSBRegionSubtype, MSBEventSubtype, RegionShapeType
 
 
 class IBlenderMSBPart(SoulstructObject, abc.ABC):
