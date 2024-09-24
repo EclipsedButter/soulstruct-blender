@@ -7,7 +7,7 @@ __all__ = [
 
     "ExportLooseHKXMapCollision",
     "ExportHKXMapCollisionIntoBinder",
-    "ExportHKXMapCollisionToMap",
+    "ExportHKXMapCollisionIntoHKXBHD",
 
     "SelectHiResFaces",
     "SelectLoResFaces",

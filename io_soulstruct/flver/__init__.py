@@ -56,7 +56,6 @@ __all__ = [
     "DDSTexture",
     "DDSTextureProps",
     "TextureExportSettings",
-    "DDSTexturePanel",
 
     "FLVERPropsPanel",
     "FLVERDummyPropsPanel",

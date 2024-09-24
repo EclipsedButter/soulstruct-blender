@@ -10,9 +10,8 @@ from types import ModuleType
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from soulstruct.base.models.base import FLVERVersion
+from soulstruct.base.models.flver import Version
 from soulstruct.base.maps.msb import MSB as BaseMSB
-from soulstruct.containers.tpf import TPFPlatform
 from soulstruct.games import *
 from soulstruct.bloodborne.maps import constants as bb_constants
 from soulstruct.bloodborne.maps import MSB as bb_MSB
@@ -22,8 +21,6 @@ from soulstruct.darksouls1r.maps import constants as ds1r_constants
 from soulstruct.darksouls1r.maps import MSB as ds1r_MSB
 from soulstruct.darksouls3.maps import constants as ds3_constants
 # from soulstruct.darksouls3.maps import MSB as ds3_MSB
-from soulstruct.demonssouls.maps import constants as des_constants
-from soulstruct.demonssouls.maps import MSB as des_MSB
 from soulstruct.eldenring.maps import constants as er_constants
 from soulstruct.eldenring.maps import MSB as er_MSB
 
@@ -31,23 +28,13 @@ from soulstruct.eldenring.maps import MSB as er_MSB
 @dataclass(slots=True)
 class GameConfig:
 
-    # File format support.
-    supports_flver: bool = False
-    supports_nvm: bool = False
-    supports_collision_model: bool = False
-    supports_animation: bool = False
-    supports_msb: bool = False
-    supports_cutscenes: bool = False
-
-    uses_matbin: bool = False
-    flver_default_version: FLVERVersion = FLVERVersion.DarkSouls_A
+    uses_matbin: bool
+    flver_default_version: Version
     # True from Bloodborne (DS2?) onwards, where Map Piece FLVER vertices store their singular bone indices in the
     # fourth 8-bit component of the 'normal_w' vertex array, rather than having a full useless four-bone `bone_indices`
     # field like real rigged FLVERs.
-    map_pieces_use_normal_w_bones: bool = False
+    map_pieces_use_normal_w_bones: bool
 
-    uses_flver0: bool = False
-    swizzle_platform: TPFPlatform | None = None  # overrides `TPF.platform` for de/swizzling
     msb_class: type[BaseMSB] | None = None
 
     # Redirect files that do and do not use the latest version of map files (e.g. to handle Darkroot Garden in DS1).
@@ -75,28 +62,9 @@ class GameConfig:
 
 
 GAME_CONFIG = {
-    DEMONS_SOULS: GameConfig(
-        supports_flver=True,
-        supports_nvm=True,
-        supports_collision_model=True,
-        supports_animation=False,  # TODO: support anims
-        supports_msb=True,
-        uses_matbin=False,
-        flver_default_version=FLVERVersion.DemonsSouls,
-        uses_flver0=True,
-        swizzle_platform=TPFPlatform.PC,  # no swizzling despite being a PS3 exclusive
-        map_pieces_use_normal_w_bones=False,
-        msb_class=des_MSB,
-        map_constants=des_constants,
-    ),
     DARK_SOULS_PTDE: GameConfig(
-        supports_flver=True,
-        supports_nvm=True,
-        supports_collision_model=True,
-        supports_animation=True,
-        supports_msb=True,
         uses_matbin=False,
-        flver_default_version=FLVERVersion.DarkSouls_A,
+        flver_default_version=Version.DarkSouls_A,
         map_pieces_use_normal_w_bones=False,
         msb_class=ds1ptde_MSB,
         new_to_old_map={
@@ -110,13 +78,8 @@ GAME_CONFIG = {
         map_constants=ds1ptde_constants,
     ),
     DARK_SOULS_DSR: GameConfig(
-        supports_flver=True,
-        supports_nvm=True,
-        supports_collision_model=True,
-        supports_animation=True,
-        supports_msb=True,
         uses_matbin=False,
-        flver_default_version=FLVERVersion.DarkSouls_A,
+        flver_default_version=Version.DarkSouls_A,
         map_pieces_use_normal_w_bones=False,
         msb_class=ds1r_MSB,
         new_to_old_map={
@@ -130,46 +93,26 @@ GAME_CONFIG = {
         map_constants=ds1r_constants,
     ),
     BLOODBORNE: GameConfig(
-        supports_flver=True,
-        supports_nvm=False,  # TODO: used?
-        supports_collision_model=False,  # TODO: could at least read hknp meshes
-        supports_animation=True,
-        supports_msb=False,  # TODO
         uses_matbin=False,
-        flver_default_version=FLVERVersion.Bloodborne_DS3_A,
+        flver_default_version=Version.Bloodborne_DS3_A,
         map_pieces_use_normal_w_bones=True,
         msb_class=bb_MSB,
         map_constants=bb_constants,
     ),
     DARK_SOULS_3: GameConfig(
-        supports_flver=True,
-        supports_nvm=False,  # not used
-        supports_collision_model=False,  # TODO: could at least read hknp meshes
-        supports_animation=True,
-        supports_msb=False,  # TODO: not supported by Soulstruct
         uses_matbin=False,
-        flver_default_version=FLVERVersion.Bloodborne_DS3_A,
+        flver_default_version=Version.Bloodborne_DS3_A,
         map_pieces_use_normal_w_bones=True,
         map_constants=ds3_constants,
     ),
     SEKIRO: GameConfig(
-        supports_flver=True,
-        supports_nvm=False,
-        supports_collision_model=False,
-        supports_animation=False,  # TODO: probably easy
-        supports_msb=False,
         uses_matbin=False,
-        flver_default_version=FLVERVersion.Sekiro_EldenRing,
+        flver_default_version=Version.Sekiro_EldenRing,
         map_pieces_use_normal_w_bones=True,
     ),
     ELDEN_RING: GameConfig(
-        supports_flver=True,
-        supports_nvm=False,
-        supports_collision_model=False,
-        supports_animation=True,
-        supports_msb=False,
         uses_matbin=True,
-        flver_default_version=FLVERVersion.Sekiro_EldenRing,
+        flver_default_version=Version.Sekiro_EldenRing,
         map_pieces_use_normal_w_bones=True,
         msb_class=er_MSB,
         map_constants=er_constants,
