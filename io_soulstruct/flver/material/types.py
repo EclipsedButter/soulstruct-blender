@@ -250,7 +250,18 @@ class BlenderFLVERMaterial:
                             bl_image = bpy.data.images[image_name]
                             break
                         except KeyError:
-                            pass
+                            #! BUTTER crudcode
+                            # do case insensitive search
+                            # really should handle this better....
+                            keys = bpy.data.images.keys()
+                            flag = False
+                            for k in keys:
+                                if k.lower() == image_name.lower():
+                                    bl_image = bpy.data.images[k]
+                                    flag = True
+                                    break
+                            if flag:
+                                break
                     else:
                         # Blender image not found. Create empty 1x1 Blender image.
                         bl_image = bpy.data.images.new(name=texture_stem, width=1, height=1, alpha=True)
