@@ -527,7 +527,12 @@ class NodeTreeBuilder:
             try:
                 return bpy.data.images[image_name]
             except KeyError:
-                pass
+                #! BUTTER crudcode
+                # do case insensitive search again...
+                keys = bpy.data.images.keys()
+                for k in keys:
+                    if k.lower() == image_name.lower():
+                        return bpy.data.images[k]
         else:
             # Blender image not found. Create empty 1x1 Blender image.
             bl_image = bpy.data.images.new(name=texture_stem, width=1, height=1, alpha=True)
