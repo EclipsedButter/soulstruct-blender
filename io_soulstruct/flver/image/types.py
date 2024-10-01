@@ -132,7 +132,9 @@ class DDSTexture:
         image_name = f"{name}{image_format.get_suffix()}"
         if image_cache_directory is None:
             # Use a temporarily file.
-            write_image_path = Path(f"~/AppData/Local/Temp/{image_name}").expanduser()
+            #! BUTTER FIX
+            # write_image_path = Path(f"~/AppData/Local/Temp/{image_name}").expanduser()
+            write_image_path = Path(tempfile.TemporaryDirectory().name).parent / str(image_name)
             is_temp_image = True
             if not pack_image_data:
                 operator.warning(
@@ -203,7 +205,9 @@ class DDSTexture:
                 f"Blender image '{self.name}' contains one or less pixels. Cannot export it."
             )
 
-        temp_image_path = Path(f"~/AppData/Local/Temp/temp.{self.image.file_format.lower()}").expanduser()
+        #! BUTTER FIX
+        # temp_image_path = Path(f"~/AppData/Local/Temp/temp.{self.image.file_format.lower()}").expanduser()
+        temp_image_path = Path(tempfile.TemporaryDirectory().name).parent / f"temp.{self.image.file_format.lower()}"
         self.image.filepath_raw = temp_image_path
         self.image.save()  # TODO: sometimes fails with 'No error' (depending on how Blender is storing image data?)
         with tempfile.TemporaryDirectory() as output_dir:
