@@ -8,6 +8,9 @@ import bpy
 
 from soulstruct.base.models.flver.material import Material
 
+from io_soulstruct.bpy_base.property_group import SoulstructPropertyGroup
+from io_soulstruct.utilities import ObjectType
+
 _MASK_ID_STRINGS = []
 
 
@@ -22,7 +25,7 @@ def _get_display_mask_id_items(self, context) -> list[tuple[str, str, str]]:
 
     mask_id_set = set()  # type: set[str]
     for obj in context.selected_objects:
-        if obj.type != "MESH":
+        if obj.type != ObjectType.MESH:
             continue
         for mat in obj.data.materials:
             if match := Material.DISPLAY_MASK_RE.match(mat.name):
@@ -36,8 +39,10 @@ def _get_display_mask_id_items(self, context) -> list[tuple[str, str, str]]:
     return items
 
 
-class FLVERToolSettings(bpy.types.PropertyGroup):
+class FLVERToolSettings(SoulstructPropertyGroup):
     """Holds settings for the various operators below. Drawn manually in operator browser windows."""
+
+    # No game-specific properties.
 
     vertex_color_layer_name: bpy.props.StringProperty(
         name="Vertex Color Layer",

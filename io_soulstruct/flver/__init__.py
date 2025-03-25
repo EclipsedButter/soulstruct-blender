@@ -1,6 +1,49 @@
 from __future__ import annotations
 
 __all__ = [
+    # region Materials
+    # region Properties
+    "MaterialToolSettings",
+    "FLVERMaterialProps",
+    "FLVERGXItemProps",
+    "FLVERMaterialSettings",
+    # endregion
+
+    # region Operators
+    "SetMaterialTexture0",
+    "SetMaterialTexture1",
+    "AutoRenameMaterials",
+    "MergeFLVERMaterials",
+    "AddMaterialGXItem",
+    "RemoveMaterialGXItem",
+    # endregion
+
+    # region Types
+    "BlenderFLVERMaterial",
+    # endregion
+
+    # region GUI
+    "FLVERGXItemUIList",
+    "FLVERMaterialPropsPanel",
+    "FLVERMaterialToolsPanel",
+    # endregion
+    # endregion
+
+    # region Models
+    # region Operators
+    "BakeBonePoseToVertices",
+    "ReboneVertices",
+
+    "HideAllDummiesOperator",
+    "ShowAllDummiesOperator",
+
+    "ExportAnyFLVER",
+    "ExportFLVERIntoAnyBinder",
+    "ExportMapPieceFLVERs",
+    "ExportCharacterFLVER",
+    "ExportObjectFLVER",
+    "ExportEquipmentFLVER",
+
     "ImportFLVER",
     "ImportMapPieceFLVER",
     "ImportCharacterFLVER",
@@ -8,78 +51,113 @@ __all__ = [
     "ImportAssetFLVER",
     "ImportEquipmentFLVER",
 
-    "ExportLooseFLVER",
-    "ExportFLVERIntoBinder",
-    "ExportMapPieceFLVERs",
-    "ExportCharacterFLVER",
-    "ExportObjectFLVER",
-    "ExportEquipmentFLVER",
+    "SelectDisplayMaskID",
+    "SelectUnweightedVertices",
+    "SetSmoothCustomNormals",
+    "SetVertexAlpha",
+    "InvertVertexAlpha",
+
+    "CopyToNewFLVER",
+    "RenameFLVER",
+    "SelectMeshChildren",
+
+    "ActivateUVMap",
+    "FastUVUnwrap",
+    "FastUVUnwrapIslands",
+    "RotateUVMapClockwise90",
+    "RotateUVMapCounterClockwise90",
+    "AddRandomUVTileOffsets",
 
     "FLVERImportSettings",
     "FLVERExportSettings",
 
-    "FLVERProps",
-    "FLVERDummyProps",
-    "FLVERGXItemProps",
-    "FLVERMaterialProps",
-    "FLVERBoneProps",
-
-    "FLVERToolSettings",
-    "CopyToNewFLVER",
-    "RenameFLVER",
-    "SelectDisplayMaskID",
-    "SetSmoothCustomNormals",
-    "SetVertexAlpha",
-    "InvertVertexAlpha",
-    "ReboneVertices",
-    "BakeBonePoseToVertices",
-    "HideAllDummiesOperator",
-    "ShowAllDummiesOperator",
-    "PrintGameTransform",
-    "draw_dummy_ids",
-
-    "MaterialToolSettings",
-    "SetMaterialTexture0",
-    "SetMaterialTexture1",
-    "AddMaterialGXItem",
-    "RemoveMaterialGXItem",
-
-    "ActivateUVTexture0",
-    "ActivateUVTexture1",
-    "ActiveUVLightmap",
-    "FastUVUnwrap",
-    "FindMissingTexturesInImageCache",
-    "SelectMeshChildren",
-    "ImportTextures",
-    "BakeLightmapSettings",
-    "BakeLightmapTextures",
-    "DDSTexture",
-    "DDSTextureProps",
-    "TextureExportSettings",
-    "DDSTexturePanel",
+    "BlenderFLVER",
+    "BlenderFLVERDummy",
 
     "FLVERPropsPanel",
     "FLVERDummyPropsPanel",
     "FLVERImportPanel",
     "FLVERExportPanel",
+    "FLVERMaterialSettingsPanel",
     "FLVERModelToolsPanel",
-    "FLVERMaterialToolsPanel",
-    "FLVERLightmapsPanel",
     "FLVERUVMapsPanel",
+    # endregion
 
+    # region Properties
+    "FLVERProps",
+    "FLVERDummyProps",
+    "FLVERBoneProps",
+    "FLVERImportSettings",
+    "FLVERExportSettings",
+    # endregion
+
+    # region Types
     "BlenderFLVER",
     "BlenderFLVERDummy",
-    "BlenderFLVERMaterial",
+    "FLVERBoneDataType",
+    "FLVERModelType",
+    # endregion
 
-    "OBJECT_UL_flver_gx_item",
-    "FLVERMaterialPropsPanel",
+    # region GUI
+    "FLVERPropsPanel",
+    "FLVERDummyPropsPanel",
+    "FLVERImportPanel",
+    "FLVERExportPanel",
+    "FLVERMaterialSettingsPanel",
+    "FLVERModelToolsPanel",
+    "FLVERUVMapsPanel",
+    # endregion
+
+    # region Draw Handlers
+    "draw_dummy_ids",
+    # endregion
+    # endregion
+
+    # region FLVER Properties
+    "FLVERToolSettings",
+    # endregion
+
+    # region Images
+    # region Properties
+    "DDSTextureProps",
+    "TextureExportSettings",
+    # endregion
+
+    # region Types
+    "DDSTexture",
+    "DDSTextureCollection",
+    # endregion
+
+    # region Operators
+    "ImportTextures",
+    "FindMissingTexturesInImageCache",
+    # "ExportTexturesIntoBinder",
+    # endregion
+
+    # region GUI
+    "DDSTexturePanel",
+    # endregion
+    # endregion
+
+    # region Lightmaps
+    # region Operators
+    "BakeLightmapTextures",
+    "BakeLightmapSettings",
+    # endregion
+
+    # region GUI
+    "FLVERLightmapsPanel",
+    # endregion
+    # endregion
+
+    # region Utilities
+    "get_flvers_from_binder",
+    # endregion
 ]
 
 from .material import *
 from .models import *
-from .misc_operators import *
 from .properties import *
 from .image import *
 from .lightmaps import *
 from .utilities import *
-from .gui import *

@@ -4,6 +4,7 @@ __all__ = [
     "ImportMapMSB",
     "ImportAnyMSB",
     "ExportMapMSB",
+    "ExportAnyMSB",
 
     "RegionDrawSettings",
     "draw_msb_regions",
@@ -12,13 +13,26 @@ __all__ = [
     "DisableAllImportModels",
     "EnableSelectedNames",
     "DisableSelectedNames",
+    "MSBPartCreationTemplates",
     "CreateMSBPart",
+    "CreateMSBRegion",
+    "CreateMSBEnvironmentEvent",
     "DuplicateMSBPartModel",
+    "BatchSetPartGroups",
+    "CopyDrawGroups",
+    "ApplyPartTransformToModel",
+    "CreateConnectCollision",
+    "MSBFindPartsPointer",
+    "FindMSBParts",
     "FindEntityID",
     "ColorMSBEvents",
+    "RestoreActivePartInitialTransform",
+    "RestoreSelectedPartsInitialTransforms",
+    "UpdateActiveMSBPartInitialTransform",
+    "UpdateSelectedPartsInitialTransforms",
 
     # PART
-    "MSBPartSubtype",
+    "BlenderMSBPartSubtype",
     "MSBPartProps",
     "MSBMapPieceProps",
     "MSBObjectProps",
@@ -29,10 +43,10 @@ __all__ = [
     "MSBNavmeshProps",
     "MSBConnectCollisionProps",
     # REGION
-    "MSBRegionSubtype",
+    "BlenderMSBRegionSubtype",
     "MSBRegionProps",
     # EVENT
-    "MSBEventSubtype",
+    "BlenderMSBEventSubtype",
     "MSBEventProps",
     "MSBLightEventProps",
     "MSBSoundEventProps",
@@ -52,7 +66,8 @@ __all__ = [
     "MSBExportSettings",
     "MSBToolSettings",
 
-    "MSBImportExportPanel",
+    "MSBImportPanel",
+    "MSBExportPanel",
     "MSBToolsPanel",
 
     "MSBPartPanel",

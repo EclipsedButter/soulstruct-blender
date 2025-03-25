@@ -52,8 +52,8 @@ class Scene(ID, bpy_struct):
     texture_export_settings: TextureExportSettings
     bake_lightmap_settings: BakeLightmapSettings
     flver_tool_settings: FLVERToolSettings
+    flver_material_settings: FLVERMaterialSettings
     material_tool_settings: MaterialToolSettings
-    mesh_move_settings: MeshMoveSettings
     map_collision_import_settings: MapCollisionImportSettings
     map_collision_tool_settings: MapCollisionToolSettings
     navmesh_face_settings: NavmeshFaceSettings
@@ -62,6 +62,8 @@ class Scene(ID, bpy_struct):
     mcg_draw_settings: MCGDrawSettings
     msb_import_settings: MSBImportSettings
     msb_export_settings: MSBExportSettings
+    msb_part_creation_templates: MSBPartCreationTemplates
+    find_msb_parts_pointer: MSBFindPartsPointer
     msb_tool_settings: MSBToolSettings
     region_draw_settings: RegionDrawSettings
     animation_import_settings: AnimationImportSettings

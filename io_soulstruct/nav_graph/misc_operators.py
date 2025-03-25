@@ -14,6 +14,8 @@ __all__ = [
     "AutoCreateMCG",
 ]
 
+import typing as tp
+
 import bmesh
 import bpy
 from mathutils import Vector
@@ -21,7 +23,7 @@ from mathutils import Vector
 from soulstruct.base.events.enums import NavmeshFlag
 
 from io_soulstruct.exceptions import SoulstructTypeError, MCGEdgeCreationError
-from io_soulstruct.msb.darksouls1r import BlenderMSBNavmesh
+from io_soulstruct.msb.types.darksouls1r import BlenderMSBNavmesh
 from io_soulstruct.types import *
 from io_soulstruct.utilities import LoggingOperator
 from .utilities import *
@@ -47,7 +49,7 @@ class RemoveMCGNodeNavmeshATriangleIndex(bpy.types.Operator):
     bl_label = "Remove Navmesh A Triangle"
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         return (
             context.active_object
             and context.active_object.soulstruct_type == SoulstructType.MCG_NODE
@@ -81,7 +83,7 @@ class RemoveMCGNodeNavmeshBTriangleIndex(bpy.types.Operator):
     bl_label = "Remove Navmesh B Triangle"
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         return (
             context.active_object
             and context.active_object.soulstruct_type == SoulstructType.MCG_NODE
@@ -104,7 +106,7 @@ class JoinMCGNodesThroughNavmesh(LoggingOperator):
                       "must be selected for drawing")
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         return (
             context.mode == "OBJECT"
             and len(context.selected_objects) == 3
@@ -137,8 +139,7 @@ class JoinMCGNodesThroughNavmesh(LoggingOperator):
 
         navmesh_parts = [
             obj for obj in context.selected_objects
-            if obj.soulstruct_type == SoulstructType.MSB_PART
-            and obj.MSB_PART.part_subtype == "Navmesh"
+            if obj.soulstruct_type == SoulstructType.MSB_PART and obj.MSB_PART.entry_subtype == "Navmesh"
         ]
         if len(navmesh_parts) > 1 or not navmesh_parts:
             raise MCGEdgeCreationError("Must select exactly one MSB Navmesh part")
@@ -159,7 +160,7 @@ class JoinMCGNodesThroughNavmesh(LoggingOperator):
             if bl_edge.node_a == node_b and bl_edge.node_b == node_a:
                 raise MCGEdgeCreationError(f"Nodes '{node_b.name}' and '{node_a.name}' are already connected.")
 
-        map_stem = bl_mcg.tight_name
+        map_stem = bl_mcg.game_name
         edge_name = f"{map_stem} Edge [{nav_id}] ({nav_index})"
 
         start = node_a.location
@@ -176,7 +177,7 @@ class JoinMCGNodesThroughNavmesh(LoggingOperator):
 
         # Add edge to same collection(s) as parent.
         for collection in bl_mcg.obj.users_collection:
-            collection.objects.link(bl_edge)
+            collection.objects.link(bl_edge.obj)
         if not bl_mcg.obj.users_collection:
             # Add to context collection if parent has no collections.
             context.scene.collection.objects.link(bl_edge)
@@ -195,7 +196,7 @@ class SetNodeNavmeshTriangles(LoggingOperator):
                       "be editing an MSB Navmesh part mesh that is already set as Navmesh A or B for selected node")
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         if context.mode != "EDIT_MESH" or not context.edit_object:
             return False
         # Have to account for the edited Mesh itself maybe not being selected. (We don't care.)
@@ -217,14 +218,13 @@ class SetNodeNavmeshTriangles(LoggingOperator):
                 bl_node.navmesh_a_triangles = [f.index for f in bm.faces if f.select]
             elif mesh is bl_node.navmesh_b:
                 bl_node.navmesh_b_triangles = [f.index for f in bm.faces if f.select]
+            return {"FINISHED"}
         except Exception as ex:
             return self.error(str(ex))
         finally:
             if bm:
                 bm.free()
                 del bm
-
-        return {"FINISHED"}
 
 
 class RefreshMCGNames(LoggingOperator):
@@ -233,7 +233,7 @@ class RefreshMCGNames(LoggingOperator):
     bl_description = "Refresh all MCG node and edge names in the selected MCG hierarchy"
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         try:
             BlenderMCG.from_active_object(context)
         except SoulstructTypeError:
@@ -242,8 +242,8 @@ class RefreshMCGNames(LoggingOperator):
 
     def execute(self, context):
 
-        bl_mcg = BlenderMCG.from_active_object(context)  # type: BlenderMCG
-        map_stem = bl_mcg.tight_name
+        bl_mcg = BlenderMCG.from_active_object(context)
+        map_stem = bl_mcg.game_name
 
         bl_nodes = bl_mcg.get_nodes()
         bl_edges = bl_mcg.get_edges()
@@ -317,7 +317,7 @@ class RecomputeEdgeCost(LoggingOperator):
     bl_description = "Recompute costs of selected MCG edges and store in \"New Cost\" custom property"
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         if not context.mode == "OBJECT":
             return False
         try:
@@ -329,11 +329,11 @@ class RecomputeEdgeCost(LoggingOperator):
     def execute(self, context):
 
         bl_edges = BlenderMCGEdge.from_selected_objects(context)  # type: list[BlenderMCGEdge]
-        map_stem = bl_edges[0].tight_name
+        map_stem = bl_edges[0].game_name
 
         for bl_edge in bl_edges:
 
-            edge_stem = bl_edge.tight_name
+            edge_stem = bl_edge.game_name
             if edge_stem != map_stem:
                 self.warning(
                     f"Selected edges must belong to a single map stem (first stem: {map_stem}). "
@@ -371,7 +371,13 @@ class RecomputeEdgeCost(LoggingOperator):
             start_face_i = min(node_a_triangles)
             end_face_i = min(node_b_triangles)
 
-            total_cost = get_best_cost(edge_navmesh.data, start_face_i, end_face_i)
+            try:
+                total_cost = get_best_cost(edge_navmesh.data, start_face_i, end_face_i)
+            except Exception as ex:
+                raise ValueError(
+                    f"Failed to compute cost of edge '{bl_edge.name}' between nodes {bl_node_a.name} and "
+                    f"{bl_node_b.name}. Make sure all NVM vertices have been merged by distance. Error: {ex}"
+                )
             if total_cost == 0.0:
                 self.warning(f"No path found in either direction between nodes for edge '{bl_edge.name}'.")
                 continue
@@ -394,7 +400,7 @@ class FindCheapestPath(LoggingOperator):
                       "will be logged to the console")
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         """NOTE: Two faces must be selected, but would need to create a BMesh to check this."""
         return (
             context.edit_object is not None
@@ -445,6 +451,12 @@ class FindCheapestPath(LoggingOperator):
         return {"FINISHED"}
 
 
+# Some type hints for `AutoCreateMCG` below.
+FACE_WITH_VERTS = tp.Tuple[bmesh.types.BMFace, frozenset[tuple[float, ...]]]
+EXIT_CLUSTER = tp.Tuple[FACE_WITH_VERTS, ...]
+NODE_WITH_KEY = tp.Tuple[BlenderMCGNode, tp.Tuple[int, int]]
+
+
 class AutoCreateMCG(LoggingOperator):
     """Create a full MCG structure from scratch but detecting node placements (adjoining 'Exit' faces) and computing
     edge costs between all pairs of nodes in each navmesh.
@@ -455,8 +467,10 @@ class AutoCreateMCG(LoggingOperator):
     """
     bl_idname = "mesh.auto_create_mcg"
     bl_label = "Create MCG from Navmeshes"
-    bl_description = ("Create an entire MCG hierarchy of nodes/edges using all navmesh 'Exit' faces. Use by selecting "
-                      "a COMPLETE, ORDERED collection of a map's MSB Navmesh parts")
+    bl_description = (
+        "Create an entire MCG hierarchy of nodes/edges using all navmesh 'Exit' faces. Use by selecting "
+        "a COMPLETE, ORDERED collection of a map's MSB Navmesh parts, typically 'mAA_BB_CC_DD Navmesh Parts'"
+    )
 
     # Holds all navmesh BMeshes so they can be freed and deleted without fail.
     navmesh_bmeshes: list[bmesh.types.BMesh]
@@ -482,20 +496,22 @@ class AutoCreateMCG(LoggingOperator):
         try:
             return self.auto_create_mcg(context)
         except Exception as ex:
+            import traceback
+            traceback.print_exc()
             return self.error(f"An error occurred during automatic MCG creation: {ex}")
         finally:
             for bm in self.navmesh_bmeshes:
                 bm.free()
                 del bm
 
-    def auto_create_mcg(self, context):
+    def auto_create_mcg(self, context: bpy.types.Context):
 
         map_stem = context.collection.name.split(" ")[0]
-        navmesh_parts = BlenderMSBNavmesh.from_collection_objects(context.collection)  # type: list[BlenderMSBNavmesh]
+        navmesh_parts = BlenderMSBNavmesh.from_collection_objects(context.collection)
 
-        # Storing navmesh BMeshes.
+        navmesh_exit_clusters = []  # type: list[tuple[EXIT_CLUSTER, ...]]
 
-        navmesh_exit_clusters = []
+        exit_sq_dist = context.scene.nav_graph_compute_settings.connected_exit_vertex_distance ** 2
 
         for navmesh_part in navmesh_parts:
 
@@ -506,91 +522,135 @@ class AutoCreateMCG(LoggingOperator):
                 return self.error(f"Navmesh part '{navmesh_part.name}' must start with 'n####'.")
 
             bm = bmesh.new()
-            bm.from_mesh(navmesh_part.data)  # same Mesh as NVM model
+            bm.from_mesh(navmesh_part.mesh)  # same Mesh as NVM model
             # We do NOT remove doubles here, as it could modify face indices.
             bm.faces.ensure_lookup_table()  # face indices won't change again
             self.navmesh_bmeshes.append(bm)
+
             flags_layer = bm.faces.layers.int.get("nvm_face_flags")
             if flags_layer is None:
                 self.warning(
                     f"Navmesh '{navmesh_part.name}' has no 'nvm_face_flags' `int` layer. Ignoring it for MCG creation."
                 )
+                navmesh_exit_clusters.append(())
                 continue
 
-            # First, find all clusters of connected 'Exit' faces in each navmesh.
-            exit_clusters = []
-            checked = []
-
-            for face in bm.faces:
-
-                if face in checked:
-                    continue
-                checked.append(face)
-
-                if face[flags_layer] & NavmeshFlag.Exit:
-                    # Find all connected 'Exit' faces.
-                    cluster = []  # type: list[tuple[bmesh.types.BMFace, frozenset[tuple[float, ...]]]]
-                    stack = [face]
-                    while stack:
-                        f = stack.pop()
-                        if f in cluster:
-                            continue
-
-                        verts = frozenset(tuple(v.co + navmesh_part.location) for v in f.verts)
-                        cluster.append((f, verts))
-                        for edge in f.edges:
-                            for other_face in edge.link_faces:
-                                if other_face in checked:
-                                    continue
-                                checked.append(other_face)  # cannot possibly already be checked
-                                if other_face not in cluster and other_face[flags_layer] & NavmeshFlag.Exit:
-                                    stack.append(other_face)
-                    exit_clusters.append(tuple(cluster))
-
-            navmesh_exit_clusters.append(tuple(exit_clusters))
+            exit_clusters = self.get_navmesh_exit_clusters(navmesh_part, bm, flags_layer)
             self.info(f"Found {len(exit_clusters)} exit clusters for MSB Navmesh {navmesh_part.name}.")
-
-        self.info("Found all exit clusters.")
-
-        # Now find connected exit clusters across navmeshes.
-        all_nodes = {}  # type: dict[tuple[tuple[int, ...], tuple[int, ...]], BlenderMCGNode]
-        # List of node objects stored for each navmesh part, along with ordered navmesh model IDs.
-        navmesh_nodes = [[] for _ in navmesh_parts]  # type: list[list[tuple[BlenderMCGNode, tuple[int, int]]]]
-
-        navmesh_pair_nodes = {}  # type: dict[tuple[int, int], list[BlenderMCGNode]]
-
-        def sq_dist(v1, v2):
-            return sum((v1[_i] - v2[_i]) ** 2 for _i in range(3))
-        sq_dist_threshold = 0.01 ** 2
+            navmesh_exit_clusters.append(exit_clusters)
 
         collection = context.scene.collection
         bl_mcg = BlenderMCG.new(f"{map_stem} MCG", data=None, collection=collection)
 
-        for i, (navmesh_part, exit_clusters) in enumerate(zip(navmesh_parts, navmesh_exit_clusters)):
+        navmesh_nodes_and_keys = self._create_mcg_nodes(
+            bl_mcg, collection, map_stem, navmesh_parts, navmesh_exit_clusters, exit_sq_dist
+        )
+        try:
+            self._create_mcg_edges(
+                bl_mcg, collection, map_stem, navmesh_parts, navmesh_nodes_and_keys
+            )
+        except ValueError as ex:
+            return self.error(f"Cannot create MCG. Error occurred during edge creation: {ex}")
+
+        # Since we succeeded, set MCG parent draw name.
+        context.scene.mcg_draw_settings.mcg_parent = bl_mcg.obj
+        return {"FINISHED"}
+
+    @staticmethod
+    def get_navmesh_exit_clusters(
+        navmesh_part: BlenderMSBNavmesh, bm: bmesh.types.BMesh, flags_layer: bmesh.types.BMLayerItem
+    ) -> tuple[EXIT_CLUSTER, ...]:
+
+        # First, find all clusters of connected 'Exit' faces in each navmesh.
+        exit_clusters = []
+        checked = []
+
+        for face in bm.faces:
+
+            if face in checked:
+                continue
+            checked.append(face)
+
+            if face[flags_layer] & NavmeshFlag.Exit:
+                # Find all connected 'Exit' faces.
+                cluster = []  # type: list[FACE_WITH_VERTS]
+                stack = [face]
+                while stack:
+                    f = stack.pop()
+                    if f in cluster:
+                        continue
+
+                    verts = frozenset(tuple(v.co + navmesh_part.location) for v in f.verts)
+                    cluster.append((f, verts))
+                    for edge in f.edges:
+                        for other_face in edge.link_faces:
+                            if other_face in checked:
+                                continue
+                            checked.append(other_face)  # cannot possibly already be checked
+                            if other_face not in cluster and other_face[flags_layer] & NavmeshFlag.Exit:
+                                stack.append(other_face)
+                exit_clusters.append(tuple(cluster))
+
+        return tuple(exit_clusters)
+
+    def _create_mcg_nodes(
+        self,
+        bl_mcg: BlenderMCG,
+        collection: bpy.types.Collection,
+        map_stem: str,
+        navmesh_parts: list[BlenderMSBNavmesh],
+        navmesh_exit_clusters: list[tuple[EXIT_CLUSTER, ...]],
+        exit_sq_dist: float,
+    ) -> list[list[NODE_WITH_KEY]]:
+        """Find connected exit clusters across navmeshes and create MCG nodes in Blender at those sites.
+
+        Returns a list of lists of `(BlenderMCGNode, (navmesh_a, navmesh_b))` tuples (one node list per navmesh part),
+        where the inner navmesh tuples are always in ascending order.
+        """
+
+        # List of node objects stored for each navmesh part, along with ordered navmesh model IDs.
+        # Actual returned list.
+        navmesh_nodes_and_keys = [[] for _ in navmesh_parts]  # type: list[list[tuple[BlenderMCGNode, tuple[int, int]]]]
+
+        # All MCG nodes, keyed by non-ordered (ascending navmesh ID) pairs of navmesh model IDs AND exact exit clusters.
+        # Used to prevent the same node from being generated multiple times (from both sides).
+        all_nodes = set()  # type: set[tuple[tuple[int, int], tuple[tuple[int, ...], tuple[int, ...]]]]
+
+        # Maps non-ordered (ascending) pairs of navmesh part indices to the nodes connecting them.
+        # Used to detect and add name suffix to multiple nodes between the same navmesh part pair.
+        navmesh_pair_nodes = {}  # type: dict[tuple[int, int], list[BlenderMCGNode]]
+
+        for nav_index, (navmesh_part, exit_clusters) in enumerate(
+            zip(navmesh_parts, navmesh_exit_clusters, strict=True)
+        ):
 
             navmesh_model_id = int(navmesh_part.name[1:5])  # validated above
-            self.info(f"Finding exit connections for navmesh {navmesh_part.name}...")
             for cluster in exit_clusters:
                 for face, face_verts in cluster:
 
-                    for j, (other_navmesh_part, other_exit_clusters) in enumerate(
-                        zip(navmesh_parts, navmesh_exit_clusters)
+                    for other_nav_index, (other_navmesh_part, other_exit_clusters) in enumerate(
+                        zip(navmesh_parts, navmesh_exit_clusters, strict=True)
                     ):
-                        if other_navmesh_part is navmesh_part:
+                        if nav_index >= other_nav_index:
+                            # Don't compare navmeshes we've already compared (or to self).
                             continue
 
                         other_navmesh_id = int(other_navmesh_part.name[1:5])  # validated above
 
-                        for other_cluster in other_exit_clusters:
-                            if navmesh_model_id < other_navmesh_id:
-                                node_key = (cluster, other_cluster)
-                                model_pair_key = (navmesh_model_id, other_navmesh_id)
-                            else:
-                                node_key = (other_cluster, cluster)
-                                model_pair_key = (other_navmesh_id, navmesh_model_id)
+                        # Don't forget that `i` and `j` are not necessarily equal to the navmesh model IDs.
 
-                            if node_key in all_nodes:
-                                # Already created this node.
+                        for other_cluster in other_exit_clusters:
+
+                            # Get node key and model pair key in ascending *navmesh ID* order.
+                            if navmesh_model_id < other_navmesh_id:
+                                model_pair_key = (navmesh_model_id, other_navmesh_id)
+                                node_key = (cluster, other_cluster)
+                            else:
+                                model_pair_key = (other_navmesh_id, navmesh_model_id)
+                                node_key = (other_cluster, cluster)
+
+                            if (model_pair_key, node_key) in all_nodes:
+                                # Already created this exact node.
                                 continue
 
                             for other_face, other_face_verts in other_cluster:
@@ -599,7 +659,7 @@ class AutoCreateMCG(LoggingOperator):
                                 hits = 0
                                 for v in face_verts:
                                     for ov in other_face_verts:
-                                        if sq_dist(v, ov) < sq_dist_threshold:
+                                        if self.sq_dist(v, ov) < exit_sq_dist:
                                             hits += 1
                                             if hits >= 2:
                                                 break
@@ -612,12 +672,12 @@ class AutoCreateMCG(LoggingOperator):
                                     continue
 
                                 # Found a touching cluster. Create a new `BlenderMCGNode`.
-                                node_name = f"{map_stem} Node [{navmesh_model_id} | {other_navmesh_id}]"
+                                node_name = f"{map_stem} Node [{model_pair_key[0]} | {model_pair_key[1]}]"
                                 if model_pair_key in navmesh_pair_nodes:
                                     # Have already created a node for this pair of navmeshes. Add index suffices.
                                     index = len(navmesh_pair_nodes[model_pair_key])  # at least 1
                                     if index == 1:
-                                        # Back-edit first node.
+                                        # Edit first node to add '(0)' suffix.
                                         navmesh_pair_nodes[model_pair_key][0].name += " (0)"
                                     node_name += f" ({index})"
                                 else:
@@ -649,42 +709,64 @@ class AutoCreateMCG(LoggingOperator):
                                     # Swap order of node's navmeshes, so node navmesh A is the earlier one.
                                     navmesh_part, other_navmesh_part = other_navmesh_part, navmesh_part
                                     cluster, other_cluster = other_cluster, cluster
+                                    # Not used after this (except for logging), but for clarity:
+                                    navmesh_model_id, other_navmesh_id = other_navmesh_id, navmesh_model_id
 
                                 bl_node.navmesh_a = navmesh_part.obj
-                                bl_node.navmesh_a_triangles = [f for f, _ in cluster]
+                                bl_node.navmesh_a_triangles = [f.index for f, _ in cluster]
                                 bl_node.navmesh_b = other_navmesh_part.obj
-                                bl_node.navmesh_b_triangles = [f for f, _ in other_cluster]
+                                bl_node.navmesh_b_triangles = [f.index for f, _ in other_cluster]
 
-                                all_nodes[node_key] = bl_node
-                                navmesh_nodes[i].append((bl_node, model_pair_key))
-                                navmesh_nodes[j].append((bl_node, model_pair_key))
+                                all_nodes.add((model_pair_key, node_key))
+                                navmesh_nodes_and_keys[nav_index].append((bl_node, model_pair_key))
+                                navmesh_nodes_and_keys[other_nav_index].append((bl_node, model_pair_key))
 
-        # Create edges.
-        for navmesh_part, bl_nodes_and_keys in zip(navmesh_parts, navmesh_nodes):
+                                self.info(
+                                    f"Created node: {bl_node.name} from {navmesh_part.name} to "
+                                    f"{other_navmesh_part.name} ({bl_node.navmesh_a.name}, {bl_node.navmesh_b.name}) "
+                                    f"with model IDs {navmesh_model_id} and {other_navmesh_id}."
+                                )
+
+            self.info(f"Found {len(navmesh_nodes_and_keys[nav_index])} nodes for navmesh {navmesh_part.name}.")
+
+        return navmesh_nodes_and_keys
+
+    @staticmethod
+    def _create_mcg_edges(
+        bl_mcg: BlenderMCG,
+        collection: bpy.types.Collection,
+        map_stem: str,
+        navmesh_parts: list[BlenderMSBNavmesh],
+        navmesh_nodes_and_keys: list[list[NODE_WITH_KEY]],
+    ):
+        """Create edges between connected node pairs in Blender MCG."""
+        for navmesh_part, nodes_and_keys in zip(navmesh_parts, navmesh_nodes_and_keys, strict=True):
             created = set()
 
-            # TODO: PyCharm just can't zip. :/
-            navmesh_part: BlenderMSBNavmesh
-            bl_nodes_and_keys: list[tuple[BlenderMCGNode, tuple[int, int]]]
-
-            if len(bl_nodes_and_keys) == 1:
+            if len(nodes_and_keys) == 1:
                 # DEAD END navmesh with a single node. Only case where `MCGNode` references a navmesh part.
-                bl_node = bl_nodes_and_keys[0][0]
+                bl_node = nodes_and_keys[0][0]
                 if bl_node.name.endswith(" <DEAD END>"):
                     # ERROR: Node cannot straddle two dead ends.
-                    return self.error(f"Node {bl_node.name} has two dead end navmeshes. Cannot create MCG.")
+                    raise ValueError(f"Node {bl_node.name} has two dead end navmeshes. Cannot create MCG.")
                 bl_node.name += " <DEAD END>"  # this will cause the above error if it has no edges in ANOTHER navmesh
                 continue  # no edges to create
 
             # We need to create non-directional edges on every pair of nodes touching this navmesh.
-            for i, (bl_node_a, (a_navmesh_a, a_navmesh_b)) in enumerate(bl_nodes_and_keys):
-                for j, (bl_node_b, (b_navmesh_a, b_navmesh_b)) in enumerate(bl_nodes_and_keys):
+            for i, (bl_node_a, (a_navmesh_a, a_navmesh_b)) in enumerate(nodes_and_keys):
+                for j, (bl_node_b, (b_navmesh_a, b_navmesh_b)) in enumerate(nodes_and_keys):
                     if i == j or (i, j) in created or (j, i) in created:
                         continue
 
                     # Neither of these can fail, by design.
                     node_a_triangles = bl_node_a.get_navmesh_triangles(navmesh_part.obj)
                     node_b_triangles = bl_node_b.get_navmesh_triangles(navmesh_part.obj)
+                    if node_a_triangles is None or node_b_triangles is None:
+                        print(navmesh_part.name, bl_node_a.navmesh_a.name, bl_node_b.navmesh_a.name)
+                        raise ValueError(
+                            f"Node {bl_node_a.name} and/or {bl_node_b.name} references no triangles in MSB Navmesh "
+                            f"'{navmesh_part.name}'. Indicates MCG generator bug."
+                        )
 
                     try:
                         start_face_i = min(node_a_triangles)
@@ -696,8 +778,22 @@ class AutoCreateMCG(LoggingOperator):
                             f"triangles in MSB Navmesh '{navmesh_part.name}'."
                         )
 
+                    if start_face_i == end_face_i:
+                        raise ValueError(
+                            f"Node {bl_node_a.name} and {bl_node_b.name} reference the same triangle "
+                            f"({start_face_i}) in MSB Navmesh '{navmesh_part.name}'. This indicates that duplicate "
+                            f"nodes have been created for the same cluster of Exit faces in the navmesh (an error)."
+                        )
+
                     # Note that this creates its own `BMesh` that removes vertex doubles.
-                    total_cost = get_best_cost(navmesh_part.data, start_face_i, end_face_i)
+                    try:
+                        total_cost = get_best_cost(navmesh_part.mesh, start_face_i, end_face_i)
+                    except Exception as ex:
+                        raise ValueError(
+                            f"Failed to compute cost between nodes {bl_node_a.name} and {bl_node_b.name} in "
+                            f"MSB Navmesh '{navmesh_part.name}'. Make sure all NVM vertices have been merged by "
+                            f"distance. Error: {ex}"
+                        )
                     if total_cost == 0.0:
                         total_cost = 10000.0  # arbitrary error catch
 
@@ -724,6 +820,6 @@ class AutoCreateMCG(LoggingOperator):
 
                     created.add((i, j))
 
-        # Since we succeeded, set MCG parent draw name.
-        context.scene.mcg_draw_settings.mcg_parent = bl_mcg.obj
-        return {"FINISHED"}
+    @staticmethod
+    def sq_dist(v1, v2) -> float:
+        return sum((v1[_i] - v2[_i]) ** 2 for _i in range(3))

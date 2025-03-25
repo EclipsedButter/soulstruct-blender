@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 __all__ = [
-    "ImportHKXMapCollision",
+    "ImportAnyHKXMapCollision",
     "ImportHKXMapCollisionWithBinderChoice",
-    "ImportSelectedMapHKXMapCollision",
+    "ImportMapHKXMapCollision",
 
-    "ExportLooseHKXMapCollision",
-    "ExportHKXMapCollisionIntoBinder",
-    "ExportHKXMapCollisionToMap",
+    "ExportAnyHKXMapCollision",
+    "ExportHKXMapCollisionIntoAnyBinder",
+    "ExportMapHKXMapCollision",
 
+    "RenameCollision",
+    "GenerateCollisionFromMesh",
     "SelectHiResFaces",
     "SelectLoResFaces",
 

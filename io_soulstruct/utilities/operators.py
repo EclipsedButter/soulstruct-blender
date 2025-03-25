@@ -6,10 +6,12 @@ __all__ = [
     "LoggingImportOperator",
     "LoggingExportOperator",
     "BinderEntrySelectOperator",
+    "ViewSelectedAtDistanceZero",
     "get_dcx_enum_property",
 ]
 
 import abc
+import logging
 import re
 import shutil
 import tempfile
@@ -19,14 +21,23 @@ from pathlib import Path
 import bpy
 from bpy.types import Context
 from bpy_extras.io_utils import ImportHelper, ExportHelper
+from mathutils import Vector
+
 from soulstruct.dcx import DCXType
 from soulstruct.containers import Binder, BinderEntry
 
 if tp.TYPE_CHECKING:
     from io_soulstruct.general.properties import SoulstructSettings
 
+_LOGGER = logging.getLogger("soulstruct.io")
+
 
 class LoggingOperator(bpy.types.Operator):
+
+    INITIAL_DEBUG_SETTING_DONE: tp.ClassVar[bool] = False
+
+    # Has REGISTER and UNDO by default.
+    bl_options = {"REGISTER", "UNDO"}
 
     # TODO: Move into `cancel()`.
     cleanup_callback: tp.Callable = None
@@ -35,26 +46,33 @@ class LoggingOperator(bpy.types.Operator):
     def settings(context) -> SoulstructSettings:
         """Retrieve and save current Soulstruct plugin general settings."""
         _settings = context.scene.soulstruct_settings
-        _settings.save_settings()
+        if not LoggingOperator.INITIAL_DEBUG_SETTING_DONE:
+            for handler in _LOGGER.handlers:
+                handler.setLevel(logging.DEBUG if _settings.enable_debug_logging else logging.INFO)
+            LoggingOperator.INITIAL_DEBUG_SETTING_DONE = True
         return _settings
 
+    @staticmethod
+    def debug(msg: str):
+        _LOGGER.debug(msg, stacklevel=2)
+        # No report.
+
     def info(self, msg: str):
-        print(f"# INFO: {msg}")
+        _LOGGER.info(msg, stacklevel=2)
         self.report({"INFO"}, msg)
 
     def warning(self, msg: str):
-        print(f"# WARNING: {msg}")
+        _LOGGER.warning(msg, stacklevel=2)
         self.report({"WARNING"}, msg)
 
     def error(self, msg: str) -> set[str]:
-        # print(f"# ERROR: {msg}")
         if self.cleanup_callback:
             try:
                 self.cleanup_callback()
             except Exception as ex:
-                print(f"# ERROR: Error occurred during cleanup callback: {ex}")
+                _LOGGER.error(f"Error occurred during cleanup callback: {ex}")
                 self.report({"ERROR"}, f"Error occurred during cleanup callback: {ex}")
-        print(f"# ERROR: {msg}")
+        _LOGGER.error(msg, stacklevel=2)
         self.report({"ERROR"}, msg)
         return {"CANCELLED"}
 
@@ -71,13 +89,13 @@ class LoggingOperator(bpy.types.Operator):
         return decorated_execute(context)
 
     @staticmethod
-    def to_object_mode():
-        if bpy.ops.object.mode_set.poll():
+    def to_object_mode(context: bpy.types.Context):
+        if context.mode != "OBJECT" and bpy.ops.object.mode_set.poll():
             bpy.ops.object.mode_set(mode="OBJECT", toggle=False)
 
     @staticmethod
-    def to_edit_mode():
-        if bpy.ops.object.mode_set.poll():
+    def to_edit_mode(context: bpy.types.Context):
+        if not context.mode.startswith("EDIT") and bpy.ops.object.mode_set.poll():
             bpy.ops.object.mode_set(mode="EDIT", toggle=False)
 
     @staticmethod
@@ -91,21 +109,44 @@ class LoggingOperator(bpy.types.Operator):
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
 
+    @staticmethod
+    def edit_object(context: Context, obj: bpy.types.Object):
+        """Enter Object mode, select and activate only `obj`, then enter Edit mode."""
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode="EDIT")
+
 
 class LoggingImportOperator(LoggingOperator, ImportHelper):
-    """Includes default `invoke()` class method that defaults to selected game directory."""
+    """Includes default `invoke()` method that defaults to selected project/game (sub)directory."""
+
+    # If non-empty, operator browser will default to this subdirectory within project or game root (depending on which
+    # is defined and whether project import is preferred).
+    DEFAULT_SUBDIR: tp.ClassVar[str] = ""
+    # If `True`, then `DEFAULT_SUBDIR` must be an importable directory for this operator to `poll()` True.
+    POLL_DEFAULT_SUBDIR: tp.ClassVar[bool] = False
 
     # Type hints for `ImportHelper` properties (must be defined by each `Operator` leaf class).
     files: tp.Collection[bpy.types.OperatorFileListElement]
     directory: str
+    filter_glob: str
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        if cls.POLL_DEFAULT_SUBDIR:
+            return cls.settings(context).has_import_dir_path(cls.DEFAULT_SUBDIR)
+        return True  # default
 
     def invoke(self, context, _event):
-        """Set the initial directory based on Global Settings."""
-        game_directory = context.scene.soulstruct_settings.game_root_path
-        if game_directory and game_directory.is_dir():
-            self.directory = str(game_directory)
-            context.window_manager.fileselect_add(self)
-            return {"RUNNING_MODAL"}
+        """Set the initial directory in preferred (existing) import root and `DEFAULT_SUBDIR`."""
+        root = self.settings(context).get_first_existing_import_root()
+        if root:
+            subdir = Path(root, self.DEFAULT_SUBDIR)
+            if subdir.is_dir():
+                self.filepath = subdir.as_posix() + "/"
+                context.window_manager.fileselect_add(self)
+                return {"RUNNING_MODAL"}
         return super().invoke(context, _event)
 
     @property
@@ -114,22 +155,34 @@ class LoggingImportOperator(LoggingOperator, ImportHelper):
 
 
 class LoggingExportOperator(LoggingOperator, ExportHelper):
-    """Includes default `invoke()` class method that defaults to selected game directory."""
+    """Includes default `invoke()` method that defaults to selected project/game (sub)directory."""
+
+    # If non-empty, operator browser will default to this subdirectory within project or game root (depending on which
+    # is defined and whether game export is enabled).
+    DEFAULT_SUBDIR: tp.ClassVar[str] = ""
+    # Subdirectory existence is never required for export (will be created).
 
     # Type hints for `ExportHelper` properties (must be defined by each `Operator` leaf class).
     directory: str
 
     def invoke(self, context, _event):
-        """Set the initial directory based on Global Settings."""
-        project_directory = context.scene.soulstruct_settings.project_root_path
-        if project_directory and Path(project_directory).is_dir():
-            self.directory = str(project_directory)
-            context.window_manager.fileselect_add(self)
-            return {"RUNNING_MODAL"}
+        """Set the initial directory in preferred (existing) export root and `DEFAULT_SUBDIR`."""
+        root = self.settings(context).get_first_existing_export_root()
+        if root:
+            subdir = Path(root, self.DEFAULT_SUBDIR)
+            if subdir.is_dir():
+                self.filepath = subdir.as_posix() + "/"
+                context.window_manager.fileselect_add(self)
+                return {"RUNNING_MODAL"}
         return super().invoke(context, _event)
 
 
 class BinderEntrySelectOperator(LoggingOperator):
+    """Base class for operators that allow the user to select from a list of Binder entries to import.
+
+    This is done by unpacking each (filtered) Binder entry to empty files in a temporary directory, then allowing the
+    user to select the entries they want to import using the file browser window.
+    """
 
     # Set by `invoke` when entry choices are written to temp directory.
     binder: Binder  # NOTE: must NOT be imported under `TYPE_CHECKING` guard, as Blender loads annotations
@@ -198,7 +251,7 @@ class BinderEntrySelectOperator(LoggingOperator):
                 f.write(entry.name)
 
         # No subdirectories used.
-        self.directory = self.temp_directory
+        self.filepath = self.temp_directory
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
@@ -244,6 +297,43 @@ class BinderEntrySelectOperator(LoggingOperator):
     def _import_entry(self, context, entry: BinderEntry):
         """Subclass must implement this function to handle the chosen Binder entry."""
         ...
+
+
+class ViewSelectedAtDistanceZero(bpy.types.Operator):
+    """Replacement for Blender's default 'View Selected' operator that sets the view distance to zero.
+
+    I use Fly mode religiously to navigate scenes (maps), but Blender does not properly handle the view distance when
+    entering and exiting Fly mode, which causes a noticeable JUMP in the camera position that gets worse the greater
+    the view distance. This operator calls `view_selected()`, but then converts the view distance to a genuine shift
+    in view location, and sets the view distance to zero.
+
+    I bind this to 'Numpad .' instead of the default `view_selected()` ('Frame Selected'). If you use Fly mode more
+    than an orbit-style view, I recommend you do the same.
+    """
+    bl_idname = "view3d.view_selected_distance_zero"
+    bl_label = "View Selected at Distance Zero"
+
+    def execute(self, context):
+        # Run the default frame selected operator.
+        bpy.ops.view3d.view_selected(use_all_regions=False)
+
+        region = context.region_data
+        if region is None:
+            self.report({"WARNING"}, "Not in a 3D view!")
+            return {"CANCELLED"}
+
+        # Store the current view distance and rotation.
+        old_distance = region.view_distance
+        rot = region.view_rotation
+
+        # Compute the camera position from the view parameters.
+        camera_pos = region.view_location + rot @ Vector((0.0, 0.0, old_distance))
+
+        # Now shift the view center to the camera position, then set view_distance to zero.
+        region.view_location = camera_pos
+        region.view_distance = 0.0
+
+        return {"FINISHED"}
 
 
 def get_dcx_enum_property(

@@ -13,45 +13,80 @@ aid porting.
 from __future__ import annotations
 
 __all__ = [
-    "MSBRegionSubtype",
+    "BlenderMSBRegionSubtype",
     "MSBRegionProps",
 ]
 
 from enum import StrEnum
 
-from soulstruct.base.maps.msb.region_shapes import RegionShapeType
-
 import bpy
+
+from soulstruct.base.maps.msb.enums import BaseMSBRegionSubtype
+from soulstruct.base.maps.msb.region_shapes import RegionShapeType
+from soulstruct.games import *
+
+from io_soulstruct.bpy_base.property_group import SoulstructPropertyGroup
 from io_soulstruct.msb.utilities import *
+from io_soulstruct.utilities import ObjectType
 
 
-class MSBRegionSubtype(StrEnum):
+class BlenderMSBRegionSubtype(StrEnum):
     """Union of Region subtypes across all games."""
-    All = "ALL"  # for games with no real subtypes (DS1, BB, ...)
+    All = "ALL"  # for games with no real subtypes (DeS, DS1, BB, ...)
+
+    @classmethod
+    def from_msb_region_subtype(cls, subtype: BaseMSBRegionSubtype) -> BaseMSBRegionSubtype:
+        try:
+            # noinspection PyTypeChecker
+            return cls[subtype.name]
+        except KeyError:
+            raise ValueError(f"Unsupported Blender MSB Region subtype: {subtype}")
 
 
-class MSBRegionProps(bpy.types.PropertyGroup):
-    entity_id: bpy.props.IntProperty(
-        name="Entity ID",
-        default=-1
-    )
+class MSBRegionProps(SoulstructPropertyGroup):
 
-    region_subtype: bpy.props.EnumProperty(
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "entry_subtype",
+
+            "entity_id",
+            "shape_type",
+            "shape_x",
+            "shape_y",
+            "shape_z",
+        ),
+        DARK_SOULS_PTDE: (
+            "entry_subtype",
+
+            "entity_id",
+            "shape_type",
+            "shape_x",
+            "shape_y",
+            "shape_z",
+        ),
+    }
+
+    entry_subtype: bpy.props.EnumProperty(
         name="Region Subtype",
         description="MSB subtype (shape) of this Region object",
         items=[
             ("NONE", "None", "Not an MSB Region"),
-            (MSBRegionSubtype.All, "All", "Older game with no region subtypes (only shapes)"),
+            (BlenderMSBRegionSubtype.All, "All", "Older game with no region subtypes (only shapes)"),
             # TODO: ER subtypes...
         ],
         default="NONE",
     )
 
+    entity_id: bpy.props.IntProperty(
+        name="Entity ID",
+        default=-1
+    )
+
     @property
-    def region_subtype_enum(self):
-        if self.region_subtype == "NONE":
+    def entry_subtype_enum(self):
+        if self.entry_subtype == "NONE":
             raise ValueError("MSB Region subtype is not set.")
-        return MSBRegionSubtype(self.region_subtype)
+        return BlenderMSBRegionSubtype(self.entry_subtype)
 
     shape_type: bpy.props.EnumProperty(
         name="Shape",
@@ -71,6 +106,7 @@ class MSBRegionProps(bpy.types.PropertyGroup):
 
     @property
     def shape_type_enum(self) -> RegionShapeType:
+        # noinspection PyTypeChecker
         return RegionShapeType[self.shape_type]
 
     # Three shape fields that are exposed differently depending on `shape` type. These are used to drive object scale.
@@ -95,7 +131,7 @@ class MSBRegionProps(bpy.types.PropertyGroup):
         """Fully replace mesh when a new shape is selected."""
         shape = RegionShapeType[self.shape_type]
         obj = self.id_data  # type: bpy.types.MeshObject
-        if obj.type != "MESH":
+        if obj.type != ObjectType.MESH:
             return  # unsupported region object
         mesh = obj.data  # type: bpy.types.Mesh
         # Clear scale drivers. New ones will be created as appropriate.

@@ -1,36 +1,38 @@
-"""Property group exposing general, global parameters for the Soulstruct Blender plugin."""
+"""Property groups exposing general, global parameters for the Soulstruct Blender plugin.
+
+If a Blender property starts with the the `Game.abbreviated_name` string (plus an underscore), it will only be drawn in
+GUIs if that game is active.
+"""
 from __future__ import annotations
 
 __all__ = [
     "SoulstructSettings",
 ]
 
-import traceback
+import logging
 import shutil
+import traceback
 import typing as tp
 from pathlib import Path
 
 import bpy
 
 from soulstruct.base.base_binary_file import BaseBinaryFile
-from soulstruct.base.models.matbin import MATBINBND
-from soulstruct.base.models.mtd import MTDBND
+from soulstruct.containers import Binder
 from soulstruct.dcx import DCXType, compress, decompress
 from soulstruct.games import *
-from soulstruct.utilities.files import read_json, write_json, create_bak
+from soulstruct.utilities.files import create_bak
 
 from io_soulstruct.exceptions import *
 from io_soulstruct.utilities import *
-from .game_config import GAME_CONFIG, GameConfig
+from .game_config import BLENDER_GAME_CONFIG, BlenderGameConfig
 from .game_structure import GameStructure
-from .enums import BlenderImageFormat
 
 if tp.TYPE_CHECKING:
-    from soulstruct.base.models.shaders import MatDef
-    from io_soulstruct.type_checking import MSB_TYPING
     from io_soulstruct.utilities import LoggingOperator
 
-_SETTINGS_PATH = Path(__file__).parent.parent / "SoulstructSettings.json"
+
+_LOGGER = logging.getLogger("soulstruct.io_soulstruct")
 
 
 # Global holder for games that front-end users can currently select (or have auto-detected) for the `game` enum.
@@ -42,8 +44,22 @@ SUPPORTED_GAMES = [
     ELDEN_RING,
 ]
 
+# Type variable for `get_initial_binder()` method.
+BINDER_T = tp.TypeVar("BINDER_T", bound=Binder)
 
-class SoulstructSettings(bpy.types.PropertyGroup):
+
+# noinspection PyUnusedLocal
+def _update_log_level(self: SoulstructSettings, context: bpy.types.Context):
+    """Set logging level of 'soulstruct.io' logger to either DEBUG or INFO."""
+    from io_soulstruct._logging import IO_CONSOLE_HANDLER
+
+    if self.enable_debug_logging:
+        IO_CONSOLE_HANDLER.setLevel(logging.DEBUG)
+    else:
+        IO_CONSOLE_HANDLER.setLevel(logging.INFO)
+
+
+class SoulstructSettings(bpy.types.PropertyGroup):  # NOT a `SoulstructPropertyGroup` (unnecessary)
     """Global settings for the Soulstruct Blender plugin."""
 
     # region True Blender Properties
@@ -160,7 +176,9 @@ class SoulstructSettings(bpy.types.PropertyGroup):
 
     prefer_import_from_project: bpy.props.BoolProperty(
         name="Prefer Import from Project",
-        description="When importing, prefer files/folders from project directory over game directory if they exist",
+        description="When importing, prefer files/folders from project directory over game directory if they exist. "
+                    "NOTE: When exporting new entries into Binders, an existing project Binder will always be "
+                    "preferred as the export target over the existing game Binder.",
         default=True,
     )
 
@@ -170,9 +188,47 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         default=False,
     )
 
-    export_des_debug_files: bpy.props.BoolProperty(
+    des_export_debug_files: bpy.props.BoolProperty(
         name="Export Demon's Souls Debug Files",
         description="Export non-DCX and/or loose files for Demon's Souls debug mode, depending on file type",
+        default=True,
+    )
+
+    import_bak_file: bpy.props.BoolProperty(
+        name="Import BAK File",
+        description="Import from '.bak' backup file when auto-importing from project/game directory. If enabled and a "
+                    "'.bak' file is not found, the import will fail",
+        default=False,
+    )
+
+    enable_debug_logging: bpy.props.BoolProperty(
+        name="Enable Debug Logging",
+        description="Enable debug logging for more detailed information in the Blender console",
+        default=False,
+        update=_update_log_level,
+    )
+
+    # region Blender Map Properties
+
+    map_stem: bpy.props.StringProperty(
+        name="Map Stem",
+        description="Subdirectory of game/project 'map' folder to use when importing or exporting map assets",
+        default="",
+    )
+
+    auto_detect_export_map: bpy.props.BoolProperty(
+        name="Auto-Detect Export Map",
+        description="Detect map stem (e.g. 'm10_00_00_00') from selected or active objects and/or collections when "
+                    "exporting project/game files, depending on the operator",
+        default=True,
+    )
+
+    smart_map_version_handling: bpy.props.BoolProperty(
+        name="Use Smart Map Version Handling",
+        description="If enabled, Blender auto-import/export will always use the latest versions of MSB, NVMBND, MCG, "
+                    "and MCP map files, but will still use the original versions of FLVER and HKXBHD/BDT files. This "
+                    "is the correct way to handle files for Darkroot Garden in DS1. Selecting map m12_00_00_00 vs. "
+                    "m12_00_00_01 in the dropdown will therefore have no effect on auto-import/export",
         default=True,
     )
 
@@ -200,106 +256,10 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         ],
     )
 
-    include_empty_map_tiles: bpy.props.BoolProperty(
+    er_include_empty_map_tiles: bpy.props.BoolProperty(
         name="Include Empty Map Tiles",
-        description="Include Elden Ring overworld small map tiles with compressed MSB size < 700 bytes",
+        description="Include Elden Ring overworld small map tiles with compressed MSB size < 700 bytes (likely empty)",
         default=False,
-    )
-
-    map_stem: bpy.props.StringProperty(
-        name="Map Stem",
-        description="Subdirectory of game/project 'map' folder to use when importing or exporting map assets",
-        default="",
-    )
-
-    str_mtdbnd_path: bpy.props.StringProperty(
-        name="MTDBND Path",
-        description="Path of custom MTDBND file for detecting material setups. "
-                    "Defaults to an automatic known location in selected project (preferred) or game directory",
-        default="",
-        subtype="FILE_PATH",
-    )
-
-    str_matbinbnd_path: bpy.props.StringProperty(
-        name="MATBINBND Path",
-        description="Path of custom MATBINBND file for detecting material setups in Elden Ring only. "
-                    "Defaults to an automatic known location in selected project (preferred) or game directory. "
-                    "If '_dlc01' and '_dlc02' variants of path name are found, they will also be loaded",
-        default="",
-        subtype="FILE_PATH",
-    )
-
-    str_image_cache_directory: bpy.props.StringProperty(
-        name="Image Cache Directory",
-        description="Path of directory to read/write cached image textures (from game DDS textures)",
-        default="",
-        subtype="DIR_PATH",
-    )
-
-    image_cache_format: bpy.props.EnumProperty(
-        name="Image Cache Format",
-        description="Format of cached image textures. Both lossless; PNG files take up less space but load slower",
-        items=[
-            ("TARGA", "TGA", "TGA format (TARGA)"),
-            ("PNG", "PNG", "PNG format"),
-        ],
-        default="TARGA",
-    )
-
-    @property
-    def bl_image_format(self):
-        return BlenderImageFormat(self.image_cache_format)
-
-    read_cached_images: bpy.props.BoolProperty(
-        name="Read Cached Images",
-        description="Read cached images of the given format with matching stems from image cache directory if given, "
-                    "rather than finding and converting DDS textures of imported FLVERs",
-        default=True,
-    )
-
-    write_cached_images: bpy.props.BoolProperty(
-        name="Write Cached Images",
-        description="Write cached images of the given format of imported FLVER textures (converted from DDS files) to "
-                    "image cache directory if given, so they can be loaded more quickly in the future or modified by "
-                    "the user without DDS headaches",
-        default=True,
-    )
-
-    pack_image_data: bpy.props.BoolProperty(
-        name="Pack Image Data",
-        description="Pack Blender Image texture data into Blend file, rather than simply linking to the cached "
-                    "image file on disk (if it exists and is loaded). Uncached DDS texture data will always be packed",
-        default=False,
-    )
-
-    import_bak_file: bpy.props.BoolProperty(
-        name="Import BAK File",
-        description="Import from '.bak' backup file when auto-importing from project/game directory. If enabled and a "
-                    "'.bak' file is not found, the import will fail",
-        default=False,
-    )
-
-    detect_map_from_collection: bpy.props.BoolProperty(
-        name="Detect Map from Collection",
-        description="Detect map stem (e.g. 'm10_00_00_00') from name of first map-like Blender collection name of "
-                    "selected objects when exporting map assets",
-        default=True,
-    )
-
-    smart_map_version_handling: bpy.props.BoolProperty(
-        name="Use Smart Map Version Handling",
-        description="If enabled, Blender auto-import/export will always use the latest versions of MSB, NVMBND, MCG, "
-                    "and MCP map files, but will still use the original versions of FLVER and HKXBHD/BDT files. This "
-                    "is the correct way to handle files for Darkroot Garden in DS1. Selecting map m12_00_00_00 vs. "
-                    "m12_00_00_01 in the dropdown will therefore have no effect on auto-import/export",
-        default=True,
-    )
-
-    # Generic enough to place here. Only used by certain operators.
-    new_model_name: bpy.props.StringProperty(
-        name="New Model Name",
-        description="Name of the new model to create/rename",
-        default="",  # default is operator-dependent
     )
 
     # endregion
@@ -341,17 +301,28 @@ class SoulstructSettings(bpy.types.PropertyGroup):
     def soulstruct_project_root_path(self) -> Path | None:
         return Path(self.soulstruct_project_root_str) if self.soulstruct_project_root_str else None
 
-    @property
-    def mtdbnd_path(self) -> Path | None:
-        return Path(self.str_mtdbnd_path) if self.str_mtdbnd_path else None
+    def get_active_object_detected_map(self, context: bpy.types.Context) -> str:
+        """Check map of active collection if `auto_detect_export_map` is enabled, or use `map_stem` otherwise."""
+        if not context.active_object:
+            return self.map_stem
+        if self.auto_detect_export_map:
+            try:
+                return get_collection_map_stem(context.active_object)
+            except ValueError:
+                # Failed to detect map from active object's collection.
+                pass
+        return self.map_stem
 
-    @property
-    def matbinbnd_path(self) -> Path | None:
-        return Path(self.str_matbinbnd_path) if self.str_matbinbnd_path else None
-
-    @property
-    def image_cache_directory(self) -> Path | None:
-        return Path(self.str_image_cache_directory) if self.str_image_cache_directory else None
+    def get_active_collection_detected_map(self, context: bpy.types.Context) -> str:
+        """Check map of active collection if `auto_detect_export_map` is enabled, or use `map_stem` otherwise."""
+        if not context.collection:
+            return self.map_stem
+        if self.auto_detect_export_map:
+            name_stem = context.collection.name.split(" ")[0]
+            if MAP_STEM_RE.match(name_stem):
+                # Collection has a map stem prefix.
+                return name_stem
+        return self.map_stem
 
     # endregion
 
@@ -380,28 +351,8 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         return self.is_game(DARK_SOULS_PTDE, DARK_SOULS_DSR)
 
     @property
-    def game_config(self) -> GameConfig:
-        return GAME_CONFIG[self.game]
-
-    def get_game_split_mesh_kwargs(self) -> dict[str, int | bool]:
-        """TODO: Need to check/handle all games correctly here."""
-        if self.is_game_ds1():
-            return dict(
-                use_mesh_bone_indices=True,
-                max_bones_per_mesh=38,
-                max_mesh_vertex_count=65535,  # TODO: not sure if 32-bit vertex indices are possible in DS1
-            )
-        elif self.is_game("DEMONS_SOULS"):
-            return dict(
-                use_mesh_bone_indices=True,
-                max_bones_per_mesh=28,  # hard-coded count for `FLVER0` meshes
-                max_mesh_vertex_count=65535,  # faces MUST use 16-bit vertex indices
-            )
-
-        return dict(
-            use_mesh_bone_indices=False,
-            max_mesh_vertex_count=4294967295,  # faces use 32-bit vertex indices
-        )
+    def game_config(self) -> BlenderGameConfig:
+        return BLENDER_GAME_CONFIG[self.game]
 
     def get_game_root_prop_name(self):
         """Get the name of the game root property for the current game."""
@@ -428,6 +379,14 @@ class SoulstructSettings(bpy.types.PropertyGroup):
             return self.project_root, self.game_root
         return self.game_root, self.project_root
 
+    def get_first_existing_import_root(self) -> Path | None:
+        """Return the first existing import root directory, or `None` if neither is set/exists."""
+        if self.prefer_import_from_project and is_path_and_dir(self.project_root_path):
+            return self.project_root_path
+        if is_path_and_dir(self.game_root_path):
+            return self.game_root_path
+        return None
+
     @staticmethod
     def get_first_existing_file_path(
         *parts: str | Path, roots: tp.Sequence[GameStructure], dcx_type: DCXType = None
@@ -443,7 +402,10 @@ class SoulstructSettings(bpy.types.PropertyGroup):
 
     @staticmethod
     def get_first_existing_dir_path(*parts: str | Path, roots: tp.Sequence[GameStructure]) -> Path | None:
-        """Check ordered `roots` for file path, returning first that exists."""
+        """Check ordered `roots` for file path, returning first that exists.
+
+        Returns `None` if no existing directory is found.
+        """
         for root in roots:
             if not root:
                 continue
@@ -456,7 +418,10 @@ class SoulstructSettings(bpy.types.PropertyGroup):
     def get_first_existing_map_file_path(
         *parts: str | Path, roots: tp.Sequence[GameStructure], dcx_type: DCXType = None, map_stem: str = None
     ) -> Path | None:
-        """Check ordered `roots` for 'map' file path, returning first that exists."""
+        """Check ordered `roots` for 'map' file path, returning first that exists.
+
+        Returns `None` if no existing map file is found.
+        """
         for root in roots:
             if not root:
                 continue
@@ -466,21 +431,25 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         return None
 
     @staticmethod
-    def get_first_existing_map_dir_path(
-        *parts: str | Path, roots: tp.Sequence[GameStructure], map_stem: str = None
-    ) -> Path | None:
-        """Check ordered `roots` for 'map' dir path, returning first that exists."""
+    def get_first_existing_map_dir_path(roots: tp.Sequence[GameStructure], map_stem: str = None) -> Path | None:
+        """Check ordered `roots` for 'map' dir path, returning first that exists.
+
+        Returns `None` if no existing map directory is found.
+        """
         for root in roots:
             if not root:
                 continue
-            path = root.get_map_dir_path(*parts, if_exist=True, map_stem=map_stem)
+            path = root.get_map_dir_path(if_exist=True, map_stem=map_stem)
             if path:
                 return path
         return None
 
     @staticmethod
     def get_first_existing_msb_path(roots: tp.Sequence[GameStructure], map_stem: str = None) -> Path | None:
-        """Check ordered `roots` for MSB file path, returning first that exists."""
+        """Check ordered `roots` for MSB file path, returning first that exists.
+
+        Returns `None` if no existing MSB file is found.
+        """
         for root in roots:
             if not root:
                 continue
@@ -495,7 +464,7 @@ class SoulstructSettings(bpy.types.PropertyGroup):
             map_stem = self.map_stem
         if not map_stem or not self.smart_map_version_handling or not self.game:
             return map_stem
-        return GAME_CONFIG[self.game].new_to_old_map.get(map_stem, map_stem)
+        return BLENDER_GAME_CONFIG[self.game].new_to_old_map.get(map_stem, map_stem)
 
     def get_latest_map_stem_version(self, map_stem: str = None):
         """Check if `smart_map_version_handling` is enabled and return the latest version of the map stem if so."""
@@ -503,7 +472,7 @@ class SoulstructSettings(bpy.types.PropertyGroup):
             map_stem = self.map_stem
         if not map_stem or not self.smart_map_version_handling or not self.game:
             return map_stem
-        return GAME_CONFIG[self.game].old_to_new_map.get(map_stem, map_stem)
+        return BLENDER_GAME_CONFIG[self.game].old_to_new_map.get(map_stem, map_stem)
 
     def get_import_file_path(self, *parts: str | Path, dcx_type: DCXType = None) -> Path:
         """Try to get file path relative to project or game directory first, depending on `prefer_import_from_project`,
@@ -544,6 +513,8 @@ class SoulstructSettings(bpy.types.PropertyGroup):
 
         If `smart_map_version_handling` is enabled, this will redirect to the earliest or latest version of the map if
         the file is a known versioned type.
+
+        File must exist, or a `FileNotFoundError` will be raised.
         """
         if not parts:
             raise ValueError("Must provide at least one part to get a map file path.")
@@ -555,16 +526,14 @@ class SoulstructSettings(bpy.types.PropertyGroup):
             raise FileNotFoundError(f"Map file not found in project or game directory with parts: {parts}")
         return path
 
-    def get_import_map_dir_path(self, *parts: str | Path, map_stem: str = None) -> Path:
+    def get_import_map_dir_path(self, map_stem: str = None) -> Path:
         """Get the 'map/{map_stem}' directory path, and optionally further, in the preferred directory.
 
         Directory must exist, or a `NotADirectoryError` will be raised.
         """
-        path = self.get_first_existing_map_dir_path(*parts, roots=self.import_roots, map_stem=map_stem)
+        path = self.get_first_existing_map_dir_path(roots=self.import_roots, map_stem=map_stem)
         if not path:
-            if parts:
-                raise NotADirectoryError(f"Map subdirectory not found in project or game directory with parts: {parts}")
-            raise NotADirectoryError(f"Map directory not found in project or game directory.")
+            raise NotADirectoryError(f"Map directory for map {map_stem} not found in project or game directory.")
         return path
 
     def get_import_msb_path(self, map_stem: str = None) -> Path:
@@ -576,12 +545,6 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         if not path:
             raise FileNotFoundError(f"MSB file for map '{map_stem}' not found in project or game directory.")
         return path
-
-    def get_cached_image_path(self, image_stem: str):
-        """Get the path to a cached image file in the image cache directory."""
-        if not self.str_image_cache_directory:
-            raise NotADirectoryError("No image cache directory set.")
-        return self.image_cache_directory / f"{image_stem}{self.bl_image_format.get_suffix()}"
 
     # endregion
 
@@ -596,6 +559,14 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         if self.game_root_path and self.also_export_to_game:
             return True  # can export to game, even if project not set
         return False
+
+    def get_first_existing_export_root(self) -> Path | None:
+        """Return the first existing export root directory, or `None` if neither is set/exists."""
+        if is_path_and_dir(self.project_root_path):
+            return self.project_root_path
+        if self.also_export_to_game and is_path_and_dir(self.game_root_path):
+            return self.game_root_path
+        return None
 
     def export_file(
         self, operator: LoggingOperator, file: BaseBinaryFile, relative_path: Path, class_name=""
@@ -630,7 +601,9 @@ class SoulstructSettings(bpy.types.PropertyGroup):
             project_path = project_root.get_file_path(relative_path)
             project_path.parent.mkdir(parents=True, exist_ok=True)
             exported_project_paths = file.write(project_path)  # will create '.bak' if appropriate
-            operator.info(f"Exported {class_name} to project: {exported_project_paths}")
+            operator.info(
+                f"Exported {class_name} to project files: {', '.join(str(path) for path in exported_project_paths)}"
+            )
             exported_game_paths = []
             if game_root and self.also_export_to_game:
                 # Copy all written files to game directory, rather than re-exporting.
@@ -790,88 +763,92 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         )
         return []
 
-    def prepare_project_file(
+    @tp.overload
+    def get_initial_binder(self, operator: LoggingOperator, binder_relative_path: Path) -> Binder:
+        """Overload for default `Binder` class type detection."""
+        ...
+
+    @tp.overload
+    def get_initial_binder(
         self,
         operator: LoggingOperator,
-        relative_path: Path,
-        overwrite_existing=False,
-    ) -> Path | None:
-        """Guarantee the existence of `relative_path` in project directory by copying it from the game directory if it
-        does not already exist in the project.
+        binder_relative_path: Path,
+        binder_class: type[BINDER_T] = None,
+    ) -> BINDER_T:
+        """Overload for custom `Binder` class type."""
+        ...
 
-        Useful for creating initial Binders in project directory that are only being partially modified with new
-        exported entries. If project directory is not set, just raises an error if `relative_path` does not exist in the
-        game directory, which implies imminent export failure.
+    def get_initial_binder(
+        self,
+        operator: LoggingOperator,
+        binder_relative_path: Path,
+        binder_class: type[BINDER_T] = None,
+    ) -> BINDER_T:
+        """Get the path to a Binder file whose contents are to be partially modified by an export operation.
 
-        Note that the caller's protocol for `overwrite_existing` should largely depend on whether the file being
-        prepared is a true 'multi-asset' file, such as a NVMBND, HKXBXF, or TPFBXF Binder (in which case we will NEVER
-        want to overwrite an existing project Binder, as it may contain other exported assets), or a 'single asset' file
-        such as a CHRBND (in which case the caller can set it to `not settings.prefer_import_from_project` so that any,
-        e.g., modified TPFs inside the existing project Binder are only kept if 'Prefer Import from Project' is enabled.
-        It's hard to perfectly handle all usage cases of this, but this is the best I've come up with.
-
-        Only creates a `.bak` backup file (if absent) in the project if `overwrite_existing == True` and an existing
-        project file is overwritten.
-
-        Returns the project file path that already exists or is created. Returns `None` if and only if the project
-        directory is not set but the game file does exist, which suggests imminent export will work (to game only).
+        Binder modding is complicated by the fact that we typically only want to modify one or a few of the entries
+        inside it, and leave the rest alone. When exporting to both the game and project directories, we also need to
+        choose which Binder to start with. This method finds and opens the appropriate Binder to modify with this logic:
+            - If the project directory is not set, we assert the existence of the Binder in the game directory and
+              return it.
+            - If the project directory is set:
+                - If the Binder exists in the project, we always return that Binder, even if `Prefer Import from
+                  Project` is disabled. Otherwise, we could lose other project modifications that have not been
+                  exported to the game directory. It does not matter if the game directory is set.
+                - If the Binder does not exist in the project, the game directory must be set, and the Binder must exist
+                  there. We return that Binder.
 
         Args:
             operator: Calling operator, for logging.
-            relative_path: Path relative to game root directory.
-            overwrite_existing: Determines behavior when `relative_path` already exists in the project and the game
-                directory does exist. Options:
-                    False: The file will NOT be copied from the game if it already exists in the project directory.
-                     True: The file will always be copied from the game, overwriting any existing project file.
-                     None: The file will be copied if and only if `prefer_import_from_project == False`,
-                Soulstruct settings, so that the initial file used comes from the game.
+            binder_relative_path: Path of Binder to be modified, relative to game root directory.
+            binder_class: Binder class to use for opening the Binder file. If `None`, defaults to base `Binder`.
         """
+        binder_class = binder_class or Binder
+
         if self.game_root_path is None and self.project_root_path is None:
-            # Export is impossible. (Generally already checked.)
+            # Obviously, no existing Binder is available. (Generally already checked.)
             raise SoulstructBlenderError(
-                f"Neither project not game directory is set. Cannot prepare file: {relative_path}"
+                f"Neither project nor game directory is set. Cannot get initial Binder file: {binder_relative_path}"
             )
 
-        # We don't pass in `if_exist=True` so we can distinguish between non-set directories and missing files below.
-        game_path = self.game_root.get_file_path(relative_path) if self.game_root_path else None
-        project_path = self.project_root.get_file_path(relative_path) if self.project_root_path else None
+        # We don't pass in `if_exist=True` so we can distinguish between non-set directories (`else None`) and missing
+        # files. (In other words, the paths returned here may not actually exist as files.)
+        game_path = self.game_root.get_file_path(binder_relative_path) if self.game_root_path else None
+        project_path = self.project_root.get_file_path(binder_relative_path) if self.project_root_path else None
 
         if not is_path_and_file(game_path) and not is_path_and_file(project_path):
-            # Neither file exists.
-            raise FileNotFoundError(f"Required file does not exist in project OR game directory: {relative_path}")
+            # Neither directory and/or file exists.
+            raise FileNotFoundError(f"Binder file does not exist in project OR game directory: {binder_relative_path}")
 
-        if self.project_root_path is None:
-            # Project directory not set. No chance of copying anything.
+        if project_path is None:
+            # Project directory is not set. Game path must exist, or we raise an error.
             if game_path.is_file():  # cannot be `None` or first check above would fail
-                return None  # only case of `None` being returned
+                return binder_class.from_path(game_path)
+
             # Game file does not exist and project directory is not set, which is a fail case.
             raise FileNotFoundError(
-                f"Project directory is not set and required file does not exist in game directory: {relative_path}"
+                f"Project directory is not set and initial Binder file does not exist in game directory: "
+                f"{binder_relative_path}"
             )
 
+        # Project directory is set.
+
         if project_path.is_file():
-            if not game_path.is_file():
-                # Cannot copy from game, but project file exists. We use it even if `overwrite_existing=True`.
+            if game_path is not None and not game_path.is_file():
+                # Unusual: game directory is set, yet the Binder relative path we are looking for ONLY exists in the
+                # project. We warn about this case, as it may indicate a faulty project path (or, obviously, an
+                # incomplete or non-unpacked game directory).
                 operator.warning(
-                    f"Required file '{relative_path}' already exists in project directory and will be used, but this "
-                    f"file does not exist in the set game directory, which is unusual."
+                    f"Initial Binder file '{binder_relative_path}' exists in project directory and will be used, but "
+                    f"this file does not exist in the set game directory '{self.game_root}'. This is unusual."
                 )
-                return project_path
-            if not overwrite_existing:
-                return project_path  # easy case
 
-            # Overwrite existing project file below. Create a backup now if absent.
-            create_bak(project_path)
+            # Open and return project version of Binder.
+            return binder_class.from_path(project_path)
 
-        # Project file does not exist (but game file does as per previous check). Copy game file to project directory,
-        # ovewriting it if it already exists ('.bak' created above).
-        try:
-            project_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(game_path, project_path)
-        except Exception as ex:
-            raise RuntimeError(f"Failed to copy file '{game_path.name}' from game directory to project directory: {ex}")
-
-        return project_path
+        # Project directory is set, project file does not exist, and game file does exist, as per logic above.
+        # We use the game file.
+        return binder_class.from_path(game_path)
 
     # endregion
 
@@ -879,7 +856,7 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         """Get map stem for export based on `obj` name, or fall back to settings map stem."""
         if oldest and latest:
             raise ValueError("Cannot specify both `oldest` and `latest` as True when getting map stem for export.")
-        if obj and self.detect_map_from_collection:
+        if obj and self.auto_detect_export_map:
             map_stem = get_collection_map_stem(obj)
         else:
             map_stem = self.map_stem
@@ -906,159 +883,26 @@ class SoulstructSettings(bpy.types.PropertyGroup):
         # Look up DCX type based on selected game and class name.
         return self.game.get_dcx_type(class_name)
 
-    def get_game_msb_class(self) -> type[MSB_TYPING]:
-        """Get the `MSB` class associated with the selected game."""
-        try:
-            return self.game.from_game_submodule_import("maps.msb", "MSB")
-        except ImportError:
-            # TODO: Specific exception type?
-            raise UnsupportedGameError(f"Game {self.game} does not have an MSB class in Soulstruct.")
-
-    def get_game_matdef_class(self) -> type[MatDef]:
-        """Get the `MatDef` class associated with the selected game."""
-        try:
-            return self.game.from_game_submodule_import("models.shaders", "MatDef")
-        except ImportError:
-            # TODO: Specific exception type?
-            raise UnsupportedGameError(f"Game {self.game} does not have a MatDef class in Soulstruct.")
-
-    def get_mtdbnd(self, operator: LoggingOperator) -> MTDBND | None:
-        """Load `MTDBND` from custom path, standard location in game directory, or bundled Soulstruct file."""
-        if is_path_and_file(self.mtdbnd_path):
-            return MTDBND.from_path(self.mtdbnd_path)
-
-        # Try to find MTDBND in project or game directory. We know their names from the bundled versions in Soulstruct,
-        # but only fall back to those actual bundled files if necessary.
-        mtdbnd_names = [
-            resource_path.name
-            for resource_key, resource_path in self.game.bundled_resource_paths.items()
-            if resource_key.endswith("MTDBND")
-        ]
-
-        if self.prefer_import_from_project:
-            labelled_roots = (("project", self.project_root), ("game", self.game_root))
-        else:
-            labelled_roots = (("game", self.game_root), ("project", self.project_root))
-
-        mtdbnd = None  # type: MTDBND | None
-        for label, root in labelled_roots:
-            if not root:
-                continue
-            for mtdbnd_name in mtdbnd_names:
-                dir_mtdbnd_path = root.get_file_path(f"mtd/{mtdbnd_name}")
-                if dir_mtdbnd_path.is_file():
-                    operator.info(
-                        f"Found MTDBND '{dir_mtdbnd_path.name}' in {label} directory: {dir_mtdbnd_path}"
-                    )
-                    if mtdbnd is None:
-                        mtdbnd = MTDBND.from_path(dir_mtdbnd_path)
-                    else:
-                        mtdbnd |= MTDBND.from_path(dir_mtdbnd_path)
-        if mtdbnd is not None:  # found
-            return mtdbnd
-
-        operator.info(f"Loading bundled MTDBND for game {self.game.name}...")
-        return MTDBND.from_bundled(self.game)
-
-    def get_matbinbnd(self, operator: LoggingOperator) -> MATBINBND | None:
-        """Load `MATBINBND` from custom path, standard location in game directory, or bundled Soulstruct file."""
-        if is_path_and_file(self.matbinbnd_path):
-            return MATBINBND.from_path(self.matbinbnd_path)
-
-        # Try to find MATBINBND in project or game directory.
-        matbinbnd_names = [
-            resource_path.name
-            for resource_key, resource_path in self.game.bundled_resource_paths.items()
-            if resource_key.endswith("MATBINBND")
-        ]
-
-        if self.prefer_import_from_project:
-            labelled_roots = (("project", self.project_root), ("game", self.game_root))
-        else:
-            labelled_roots = (("game", self.game_root), ("project", self.project_root))
-
-        matbinbnd = None  # type: MATBINBND | None
-        for label, root in labelled_roots:
-            if not root:
-                continue
-            for matbinbnd_name in matbinbnd_names:
-                dir_matbinbnd_path = root.get_file_path(f"material/{matbinbnd_name}")
-                if dir_matbinbnd_path.is_file():
-                    operator.info(
-                        f"Found MATBINBND '{dir_matbinbnd_path.name}' in {label} directory: {dir_matbinbnd_path}"
-                    )
-                    if matbinbnd is None:
-                        matbinbnd = MATBINBND.from_path(dir_matbinbnd_path)
-                    else:
-                        matbinbnd |= MATBINBND.from_path(dir_matbinbnd_path)
-        if matbinbnd is not None:  # found
-            return matbinbnd
-
-        operator.info(f"Loading bundled MATBINBND for game {self.game.name}...")
-        return MATBINBND.from_bundled(self.game)
-
-    # endregion
-
-    # region Save/Load Settings
-
-    def load_settings(self):
-        """Read settings from a JSON file and set them to this group by scanning annotations."""
-        try:
-            json_settings = read_json(_SETTINGS_PATH)
-        except FileNotFoundError:
-            return  # do nothing
-
-        # All JSON types are compatible (strings, ints, bools).
-        for prop_name in self._get_bl_prop_names():
-            json_value = json_settings.get(prop_name, None)
-            if json_value is None:
-                continue  # not saved
-            setattr(self, prop_name, json_value)
-
-    def save_settings(self):
-        """Write these settings to a JSON file by scanning annotations."""
-        current_settings = {
-            prop_name: getattr(self, prop_name)
-            for prop_name in self._get_bl_prop_names()
-        }
-        write_json(_SETTINGS_PATH, current_settings, indent=4)
-
-    @classmethod
-    def _get_bl_prop_names(cls) -> list[str]:
-        prop_names = []
-        for prop_name, prop_type in cls.__annotations__.items():
-            if isinstance(prop_type, str):
-                if "Property" in prop_type:
-                    prop_names.append(prop_name)
-            elif "Property" in prop_type.__name__:
-                prop_names.append(prop_name)
-        return prop_names
-
-    # endregion
-
     # region Internal Methods
 
-    def process_file_map_stem_version(self, map_stem: str, *parts: str | Path) -> str:
+    def process_file_map_stem_version(self, map_stem: str, file_name: str) -> str:
         """If `smart_map_version_handling` is enabled, this will redirect to the version of the given map stem
         (DD part) that is appropriate for the file type given in `parts` (if given)."""
-        if not self.smart_map_version_handling or not parts:
+        if not self.smart_map_version_handling:
             # Nothing to process.
             return map_stem
-        return GAME_CONFIG[self.game].process_file_map_stem_version(map_stem, *parts)
+        return BLENDER_GAME_CONFIG[self.game].process_file_map_stem_version(map_stem, file_name)
 
     def get_relative_msb_path(self, map_stem: str = None) -> Path | None:
         """Get relative MSB path of given `map_stem` (or selected by default) for selected game.
 
         If `smart_map_version_handling` is enabled, this will redirect to the latest version of the MSB.
         """
-        if map_stem is None:
-            map_stem = self.map_stem
+        map_stem = map_stem or self.map_stem
         if not map_stem:
             return None
         map_stem = self.process_file_map_stem_version(map_stem, f"{map_stem}.msb")
-        return self.game.process_dcx_path(
-            Path(self.game.default_file_paths["MapStudioDirectory"], f"{map_stem}.msb")
-        )
+        return self.game.process_dcx_path(Path(self.game.default_file_paths["MapStudioDirectory"], f"{map_stem}.msb"))
 
     # endregion
 

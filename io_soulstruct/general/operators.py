@@ -15,7 +15,7 @@ from pathlib import Path
 
 import bpy
 
-from io_soulstruct.general.game_config import GAME_CONFIG
+from io_soulstruct.general.game_config import BLENDER_GAME_CONFIG
 from io_soulstruct.utilities import *
 
 if tp.TYPE_CHECKING:
@@ -58,7 +58,7 @@ class _SelectMapDirectory(LoggingOperator):
         ...
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         return cls.get_root(context) is not None
 
     @staticmethod
@@ -87,7 +87,7 @@ class _SelectMapDirectory(LoggingOperator):
         """Elden Ring nests overworld maps under m60/m61, and checks an extra filter enum."""
 
         def get_map_desc(map_stem: str):
-            return GAME_CONFIG["ELDEN_RING"].map_constants.get_map(map_stem).verbose_name
+            return BLENDER_GAME_CONFIG["ELDEN_RING"].map_constants.get_map(map_stem).verbose_name
 
         if filter_mode.endswith("DUNGEONS"):
             # Dungeons. Possible extra area check.
@@ -140,7 +140,7 @@ class _SelectMapDirectory(LoggingOperator):
 
             def get_map_desc(map_stem: str):
                 try:
-                    return GAME_CONFIG[settings.game].map_constants.get_map(map_stem).verbose_name
+                    return BLENDER_GAME_CONFIG[settings.game].map_constants.get_map(map_stem).verbose_name
                 except (KeyError, AttributeError, ValueError):
                     return map_stem
 
@@ -195,13 +195,13 @@ class SelectProjectMapDirectory(_SelectMapDirectory):
         return settings.project_root
 
 
-class SelectImageCacheDirectory(LoggingOperator):
+class SelectImageCacheDirectory(LoggingImportOperator):
     """Browse for global image cache directory."""
     bl_idname = "soulstruct.select_image_cache_directory"
     bl_label = "Select Image Cache Directory"
     bl_description = "Select image texture cache directory with browser"
 
-    directory: bpy.props.StringProperty()
+    directory: bpy.props.StringProperty(options={'HIDDEN'})
 
     filter_glob: bpy.props.StringProperty(
         default="",
@@ -214,11 +214,11 @@ class SelectImageCacheDirectory(LoggingOperator):
         settings = self.settings(context)
         default_dir = settings.get_import_dir_path()
         if default_dir:
-            self.directory = str(default_dir)
+            self.filepath = str(default_dir)
         else:
             for steam_common_location in STEAM_COMMON_LOCATIONS:
                 if steam_common_location.is_dir():
-                    self.directory = str(steam_common_location)
+                    self.filepath = str(steam_common_location)
                     break
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
@@ -242,8 +242,8 @@ class SelectCustomMTDBNDFile(LoggingImportOperator):
     def execute(self, context):
         if self.filepath:
             mtdbnd_path = Path(self.filepath).resolve()
-            settings = self.settings(context)
-            settings.str_mtdbnd_path = str(mtdbnd_path)
+            mat_settings = context.scene.flver_material_settings
+            mat_settings.str_mtdbnd_path = str(mtdbnd_path)
         return {"FINISHED"}
 
 
@@ -258,8 +258,8 @@ class SelectCustomMATBINBNDFile(LoggingImportOperator):
     def execute(self, context):
         if self.filepath:
             matbinbnd_path = Path(self.filepath).resolve()
-            settings = self.settings(context)
-            settings.str_matbinbnd_path = str(matbinbnd_path)
+            mat_settings = context.scene.flver_material_settings
+            mat_settings.str_matbinbnd_path = str(matbinbnd_path)
         return {"FINISHED"}
 
 

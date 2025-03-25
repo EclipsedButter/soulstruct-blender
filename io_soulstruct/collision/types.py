@@ -14,17 +14,17 @@ from io_soulstruct.exceptions import MapCollisionExportError
 from io_soulstruct.types import *
 from io_soulstruct.utilities import *
 
-from soulstruct_havok.enums import PyHavokModule
+from soulstruct_havok.enums import HavokModule
 from soulstruct_havok.fromsoft.shared.map_collision import *
 
 from .properties import MapCollisionProps
 from .utilities import HKX_MATERIAL_NAME_RE
 
 
-class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]):
+class BlenderMapCollision(BaseBlenderSoulstructObject[MapCollisionModel, MapCollisionProps]):
 
     TYPE = SoulstructType.COLLISION
-    OBJ_DATA_TYPE = SoulstructDataType.MESH
+    BL_OBJ_TYPE = ObjectType.MESH
     SOULSTRUCT_CLASS = MapCollisionModel
 
     obj: bpy.types.MeshObject
@@ -57,7 +57,8 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
         soulstruct_obj: MapCollisionModel,
         name: str,
         collection: bpy.types.Collection = None,
-        lo_collision: MapCollisionModel = None,  # optional
+        *,
+        lo_collision: MapCollisionModel | None = None,  # optional
     ) -> tp.Self:
         """Read a HKX or two (hi/lo) HKXs into a single Blender mesh, with materials representing res/submeshes."""
         hi_collision = soulstruct_obj
@@ -123,7 +124,7 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
     def to_hkx_pair(
         self,
         operator: LoggingOperator,
-        py_havok_module: PyHavokModule,
+        havok_module: HavokModule,
         require_hi=True,
         use_hi_if_missing_lo=False,
         hi_name="",
@@ -138,7 +139,7 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
         if not self.obj.material_slots:
             raise ValueError(f"HKX model mesh '{self.name}' has no materials for submesh detection.")
 
-        model_name = self.export_name
+        model_name = self.game_name
         if model_name.startswith("h") or hi_name:
             hi_name = hi_name or model_name
             lo_name = lo_name or model_name.replace("h", "l", 1)
@@ -230,7 +231,7 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
             hi_collision = self.SOULSTRUCT_CLASS(
                 name=hi_name,
                 meshes=hi_hkx_meshes,
-                py_havok_module=py_havok_module,
+                havok_module=havok_module,
             )
             hi_collision.path = Path(f"{hi_name}.hkx")
         else:
@@ -243,7 +244,7 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
             lo_collision = self.SOULSTRUCT_CLASS(
                 name=lo_name,
                 meshes=lo_hkx_meshes,
-                py_havok_module=py_havok_module,
+                havok_module=havok_module,
             )
             lo_collision.path = Path(f"{lo_name}.hkx")
         elif use_hi_if_missing_lo:
@@ -251,8 +252,9 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
             lo_collision = self.SOULSTRUCT_CLASS(
                 name=lo_name,
                 meshes=hi_hkx_meshes,
-                py_havok_module=py_havok_module,
+                havok_module=havok_module,
             )
+            lo_collision.path = Path(f"{lo_name}.hkx")
         else:
             operator.warning(
                 f"No 'lo' HKX meshes found for '{lo_name}' and `use_hi_if_missing_lo=False`. No lo-res exported."
@@ -266,6 +268,22 @@ class BlenderMapCollision(SoulstructObject[MapCollisionModel, MapCollisionProps]
             )
 
         return hi_collision, lo_collision
+
+    def duplicate(self, collections: tp.Sequence[bpy.types.Collection] = None) -> BlenderMapCollision:
+        """Duplicate Collision model to a new object. Does not rename (will just add duplicate suffix)."""
+        new_model = new_mesh_object(self.name, self.data.copy())
+        new_model.soulstruct_type = SoulstructType.COLLISION
+        # NOTE: There are currently no properties in the 'COLLISION' property group.
+        # The only non-mesh data in a Collision model is represented by HKX materials.
+        copy_obj_property_group(self.obj, new_model, "COLLISION")
+        for collection in collections:
+            collection.objects.link(new_model)
+        return self.__class__(new_model)
+
+    def rename(self, new_name: str):
+        """Just renames object and data."""
+        self.obj.name = new_name
+        self.data.name = new_name
 
     @staticmethod
     def join_collision_meshes(

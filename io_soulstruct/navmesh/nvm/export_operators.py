@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 __all__ = [
-    "ExportLooseNVM",
-    "ExportNVMIntoBinder",
-    "ExportNVMIntoSelectedMap",
+    "ExportAnyNVM",
+    "ExportNVMIntoAnyBinder",
+    "ExportMapNVM",
 ]
 
 import traceback
@@ -26,7 +26,7 @@ from io_soulstruct.utilities.misc import *
 from .types import *
 
 
-class ExportLooseNVM(LoggingExportOperator):
+class ExportAnyNVM(LoggingExportOperator):
     """Export loose NVM file from a Blender mesh.
 
     Mesh faces should be using materials named `Navmesh Flag {type}`
@@ -46,7 +46,7 @@ class ExportLooseNVM(LoggingExportOperator):
     dcx_type: get_dcx_enum_property(DCXType.Null)  # no compression in DS1
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         return context.active_object and context.active_object.soulstruct_type == SoulstructType.NAVMESH
 
     def invoke(self, context, _event):
@@ -74,7 +74,7 @@ class ExportLooseNVM(LoggingExportOperator):
             traceback.print_exc()
             return self.error(f"Cannot get exported NVM. Error: {ex}")
         else:
-            nvm.dcx_type = DCXType[self.dcx_type]
+            nvm.dcx_type = DCXType.from_member_name(self.dcx_type)
 
         try:
             # Will create a `.bak` file automatically if absent.
@@ -86,7 +86,7 @@ class ExportLooseNVM(LoggingExportOperator):
         return {"FINISHED"}
 
 
-class ExportNVMIntoBinder(LoggingImportOperator):
+class ExportNVMIntoAnyBinder(LoggingImportOperator):
     bl_idname = "export_scene.nvm_binder"
     bl_label = "Export NVM Into Binder"
     bl_description = "Export NVM navmesh files into a FromSoftware Binder (BND/BHD)"
@@ -120,7 +120,7 @@ class ExportNVMIntoBinder(LoggingImportOperator):
     )
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         """Requires one or more selected Mesh objects."""
         return (
             len(context.selected_objects) >= 1
@@ -131,7 +131,7 @@ class ExportNVMIntoBinder(LoggingImportOperator):
         if not self.poll(context):
             return self.error("No valid Meshes selected for NVM export.")
 
-        selected_bl_nvms = BlenderNVM.from_selected_objects(context)  # type: list[BlenderNVM]
+        selected_bl_nvms = BlenderNVM.from_selected_objects(context, sort=True)  # type: list[BlenderNVM]
 
         try:
             binder = Binder.from_path(self.filepath)
@@ -140,7 +140,7 @@ class ExportNVMIntoBinder(LoggingImportOperator):
         binder_stem = binder.path.name.split(".")[0]
 
         for bl_nvm in selected_bl_nvms:
-            model_stem = bl_nvm.export_name
+            model_stem = bl_nvm.game_name
 
             try:
                 nvm = bl_nvm.to_soulstruct_obj(self, context)
@@ -148,7 +148,7 @@ class ExportNVMIntoBinder(LoggingImportOperator):
                 traceback.print_exc()
                 return self.error(f"Cannot get exported NVM. Error: {ex}")
             else:
-                nvm.dcx_type = DCXType[self.dcx_type]  # most likely `Null` for file in `nvmbnd` Binder
+                nvm.dcx_type = DCXType.from_member_name(self.dcx_type)  # most likely `Null` for file in `nvmbnd` Binder
 
             matching_entries = binder.find_entries_matching_name(rf"{model_stem}\.nvm(\.dcx)?")
             if not matching_entries:
@@ -202,7 +202,7 @@ class ExportNVMIntoBinder(LoggingImportOperator):
         return {"FINISHED"}
 
 
-class ExportNVMIntoSelectedMap(LoggingOperator):
+class ExportMapNVM(LoggingOperator):
 
     bl_idname = "export_scene.nvm_selected_map"
     bl_label = "Export NVM"
@@ -211,7 +211,7 @@ class ExportNVMIntoSelectedMap(LoggingOperator):
     # Always overwrites existing NVM entries.
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         """One or more 'n*' Meshes selected."""
         settings = cls.settings(context)
         if not settings.game_config.supports_nvm:
@@ -229,7 +229,7 @@ class ExportNVMIntoSelectedMap(LoggingOperator):
 
         settings = self.settings(context)
 
-        if not settings.map_stem and not settings.detect_map_from_collection:
+        if not settings.map_stem and not settings.auto_detect_export_map:
             return self.error(
                 "No game map directory specified in Soulstruct settings and `Detect Map from Collection` is disabled."
             )
@@ -244,9 +244,9 @@ class ExportNVMIntoSelectedMap(LoggingOperator):
             return self.error(f"Unsupported game: {settings.game}")
 
         opened_nvmbnds = {}  # type: dict[Path, BaseNVMBND]
-        bl_nvms = BlenderNVM.from_selected_objects(context)  # type: list[BlenderNVM]
+        bl_nvms = BlenderNVM.from_selected_objects(context, sort=True)  # type: list[BlenderNVM]
 
-        export_loose_des_nvms = settings.is_game(DEMONS_SOULS) and settings.export_des_debug_files
+        export_loose_des_nvms = settings.is_game(DEMONS_SOULS) and settings.des_export_debug_files
         loose_nvms_to_export = []  # type: list[tuple[NVM, Path]]
 
         for bl_nvm in bl_nvms:
@@ -258,19 +258,15 @@ class ExportNVMIntoSelectedMap(LoggingOperator):
                 # Open new NVMBND. We start with the game NVMBND unless `Prefer Import from Project` is enabled.
                 try:
                     # We never overwrite existing project NVMBNDs as they may contain other custom NVMs.
-                    nvmbnd_path = settings.prepare_project_file(self, relative_nvmbnd_path, overwrite_existing=False)
-                except FileNotFoundError as ex:
-                    self.error(f"Cannot find NVMBND: {relative_nvmbnd_path}. Error: {ex}")
-                    continue
-                try:
-                    nvmbnd = opened_nvmbnds[relative_nvmbnd_path] = nvmbnd_class.from_path(nvmbnd_path)
+                    nvmbnd = settings.get_initial_binder(self, relative_nvmbnd_path, nvmbnd_class)
                 except Exception as ex:
-                    self.error(f"Could not load NVMBND for map '{map_stem}'. Error: {ex}")
+                    self.error(f"Cannot find/open NVMBND: {relative_nvmbnd_path}. Error: {ex}")
                     continue
+                opened_nvmbnds[relative_nvmbnd_path] = nvmbnd
             else:
                 nvmbnd = opened_nvmbnds[relative_nvmbnd_path]
 
-            model_stem = bl_nvm.export_name
+            model_stem = bl_nvm.game_name
 
             try:
                 nvm = bl_nvm.to_soulstruct_obj(self, context)
@@ -294,7 +290,7 @@ class ExportNVMIntoSelectedMap(LoggingOperator):
                 entry.entry_id = i
             exported_paths += settings.export_file(self, nvmbnd, relative_nvmbnd_path)
 
-        if settings.is_game(DEMONS_SOULS) and settings.export_des_debug_files and loose_nvms_to_export:
+        if settings.is_game(DEMONS_SOULS) and settings.des_export_debug_files and loose_nvms_to_export:
             # Export loose NVMs next to NVMBND.
             for nvm, relative_nvm_path in loose_nvms_to_export:
                 exported_paths += settings.export_file(self, nvm, relative_nvm_path)

@@ -8,8 +8,10 @@ __all__ = [
 
 import bpy
 
+from io_soulstruct.bpy_base.property_group import SoulstructPropertyGroup
 
-class NVMProps(bpy.types.PropertyGroup):
+
+class NVMProps(SoulstructPropertyGroup):
     """No properties currently."""
     pass
 
@@ -24,7 +26,9 @@ class NVMFaceIndex(bpy.types.PropertyGroup):
     )
 
 
-class NVMEventEntityProps(bpy.types.PropertyGroup):
+class NVMEventEntityProps(SoulstructPropertyGroup):
+
+    # No game-specific properties.
 
     entity_id: bpy.props.IntProperty(
         name="Entity ID",
@@ -36,4 +40,11 @@ class NVMEventEntityProps(bpy.types.PropertyGroup):
         name="Triangles",
         type=NVMFaceIndex,
         description="Triangle indices in the Navmesh that this event affects",
+    )
+
+    # Internal for GUI only:
+    triangle_index: bpy.props.IntProperty(
+        name="Triangle Index",
+        default=0,
+        description="Index of the currently selected triangle",
     )

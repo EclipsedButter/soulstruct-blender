@@ -9,9 +9,9 @@ TODO: Currently only supports map collision HKX files from Dark Souls Remastered
 from __future__ import annotations
 
 __all__ = [
-    "ImportHKXMapCollision",
+    "ImportAnyHKXMapCollision",
     "ImportHKXMapCollisionWithBinderChoice",
-    "ImportSelectedMapHKXMapCollision",
+    "ImportMapHKXMapCollision",
 ]
 
 import shutil
@@ -43,11 +43,11 @@ class HKXImportInfo(tp.NamedTuple):
     lo_collision: MapCollisionModel
 
 
-class ImportHKXMapCollision(LoggingImportOperator):
+class ImportAnyHKXMapCollision(LoggingImportOperator):
     """Most generic importer. Loads standalone HKX files or HKX entries from a HKXBHD Binder (one/all)."""
 
     bl_idname = "import_scene.hkx_map_collision"
-    bl_label = "Import Map Collision"
+    bl_label = "Import Any Map Collision"
     bl_description = "Import a HKX map collision file. Can import from HKXBHD split Binders and handles DCX compression"
 
     filter_glob: bpy.props.StringProperty(
@@ -80,7 +80,7 @@ class ImportHKXMapCollision(LoggingImportOperator):
         except NotADirectoryError:
             return super().invoke(context, _event)
 
-        self.directory = str(map_dir)
+        self.filepath = str(map_dir)
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
@@ -262,7 +262,7 @@ class ImportHKXMapCollisionWithBinderChoice(LoggingOperator):
         bpy.ops.wm.hkx_map_collision_binder_choice_operator("INVOKE_DEFAULT")
 
 
-class ImportSelectedMapHKXMapCollision(LoggingOperator):
+class ImportMapHKXMapCollision(LoggingOperator):
     bl_idname = "import_scene.map_hkx_map_collision"
     bl_label = "Import Map Collision"
     bl_description = "Import selected HKX map collision entry from selected game map HKXBHD"
@@ -295,7 +295,7 @@ class ImportSelectedMapHKXMapCollision(LoggingOperator):
     ENTRY_NAME_RE = re.compile(r"\((\d+)\) (.+)")
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         settings = cls.settings(context)
         map_stem = settings.get_oldest_map_stem_version()  # collision uses oldest
         if not settings.game_config.supports_collision_model:
@@ -330,7 +330,7 @@ class ImportSelectedMapHKXMapCollision(LoggingOperator):
                 map_dir = settings.get_import_map_dir_path(map_stem=settings.get_oldest_map_stem_version())
             except NotADirectoryError as ex:
                 return self.error(f"Could not find map directory. Error: {ex}")
-            self.directory = str(map_dir)
+            self.filepath = str(map_dir)
             context.window_manager.fileselect_add(self)
             return {"RUNNING_MODAL"}
 
@@ -349,9 +349,7 @@ class ImportSelectedMapHKXMapCollision(LoggingOperator):
                 f.write(entry.name)
 
         # No subdirectories used.
-        # TODO: Can't get this to work after the first time. Last `filepath` seems to mess it up, but setting it to ""
-        #  just puts the window in Documents, even though the `directory` is correct.
-        self.directory = self.temp_directory
+        self.filepath = self.temp_directory
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
@@ -438,8 +436,8 @@ class ImportSelectedMapHKXMapCollision(LoggingOperator):
         map_stem = settings.get_oldest_map_stem_version()
         # NOTE: Currently no Map Collision model import settings.
 
-        collection = get_or_create_collection(
-            context.scene.collection, f"{map_stem} Models", f"{map_stem} Collision Models"
+        collection = find_or_create_collection(
+            context.scene.collection, "Models", f"{map_stem} Models", f"{map_stem} Collision Models"
         )
 
         # Import single HKX.

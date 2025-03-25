@@ -35,7 +35,7 @@ from soulstruct.utilities.maths import Vector3, Vector4, Matrix3
 from soulstruct_havok.utilities.maths import TRSTransform, Quaternion as GameQuaternion
 
 
-def GAME_TO_BL_VECTOR(game_vector: Vector3 | Vector4 | tp.Sequence[float, float, float]) -> Vector:
+def GAME_TO_BL_VECTOR(game_vector: Vector3 | Vector4 | tp.Sequence[float]) -> Vector:
     """Just swaps Y and Z axes. X increases to the right in both systems; the game is left-handed and Blender is
     right-handed.
 
@@ -286,19 +286,18 @@ def get_basis_matrix(
     """Get the appropriate matrix to assign to `pose_bone.matrix_basis` from `armature_matrix` by inverting Blender's
     process (see `get_armature_matrix()`).
 
-    Uses `armature_inv_matrices` and `cached_local_inv_matrix`, both indexed by bone name, to avoid recalculating the
+    Uses `armature_inv_matrices` and `cached_local_inv_matrix`, both keyed by bone name, to avoid recalculating the
     inverted matrices of multi-child bones.
 
     Inverse of `get_armature_matrix()`.
     """
-    local_inv = cached_local_inv_matrices.setdefault(
-        bone_name,
-        armature.data.bones[bone_name].matrix_local.inverted(),
-    )
+    if bone_name not in cached_local_inv_matrices:
+        cached_local_inv_matrices[bone_name] = armature.data.bones[bone_name].matrix_local.inverted()
+    local_inv = cached_local_inv_matrices[bone_name]
     parent_bone = armature.pose.bones[bone_name].parent
 
     if parent_bone is None:
         return local_inv @ armature_matrix
-    else:
-        parent_removed = armature_inv_matrices[parent_bone.name] @ armature_matrix
-        return local_inv @ armature.data.bones[parent_bone.name].matrix_local @ parent_removed
+
+    parent_removed = armature_inv_matrices[parent_bone.name] @ armature_matrix
+    return local_inv @ armature.data.bones[parent_bone.name].matrix_local @ parent_removed

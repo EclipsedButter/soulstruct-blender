@@ -1,20 +1,32 @@
 __all__ = [
+    # region Properties
     "MaterialToolSettings",
-    "SetMaterialTexture0",
-    "SetMaterialTexture1",
-    "AddMaterialGXItem",
-    "RemoveMaterialGXItem",
-
     "FLVERMaterialProps",
     "FLVERGXItemProps",
+    "FLVERMaterialSettings",
+    # endregion
 
+    # region Operators
+    "SetMaterialTexture0",
+    "SetMaterialTexture1",
+    "AutoRenameMaterials",
+    "MergeFLVERMaterials",
+    "AddMaterialGXItem",
+    "RemoveMaterialGXItem",
+    # endregion
+
+    # region Types
     "BlenderFLVERMaterial",
+    # endregion
 
-    "OBJECT_UL_flver_gx_item",
+    # region GUI
+    "FLVERGXItemUIList",
     "FLVERMaterialPropsPanel",
+    "FLVERMaterialToolsPanel",
+    # endregion
 ]
 
-from .misc_operators import *
+from .operators import *
 from .properties import *
 from .types import *
 from .gui import *

@@ -9,10 +9,10 @@ This file format is only used in DeS and DS1 (PTDE/DSR).
 from __future__ import annotations
 
 __all__ = [
-    "ImportMCG",
-    "ImportSelectedMapMCG",
-    "ImportMCP",
-    "ImportSelectedMapMCP",
+    "ImportAnyMCG",
+    "ImportMapMCG",
+    "ImportAnyMCP",
+    "ImportMapMCP",
 ]
 
 import traceback
@@ -31,9 +31,9 @@ if tp.TYPE_CHECKING:
     from io_soulstruct.type_checking import *
 
 
-class ImportMCG(LoggingImportOperator):
+class ImportAnyMCG(LoggingImportOperator):
     bl_idname = "import_scene.mcg"
-    bl_label = "Import MCG"
+    bl_label = "Import Any MCG"
     bl_description = "Import an MCG navmesh node/edge graph file. Supports DCX-compressed files"
 
     filter_glob: bpy.props.StringProperty(
@@ -102,15 +102,15 @@ class ImportMCG(LoggingImportOperator):
         return {"FINISHED"}
 
 
-class ImportSelectedMapMCG(LoggingOperator):
-    bl_idname = "import_scene.quick_mcg"
-    bl_label = "Import MCG"
+class ImportMapMCG(LoggingOperator):
+    bl_idname = "import_scene.map_mcg"
+    bl_label = "Import Map MCG"
     bl_description = "Import MCG navmesh node/edge graph file from selected game map"
 
     # MSB always auto-found.
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         return bool(cls.settings(context).map_stem)
 
     def execute(self, context):
@@ -165,9 +165,9 @@ class ImportSelectedMapMCG(LoggingOperator):
         return {"FINISHED"}
 
 
-class ImportMCP(LoggingImportOperator):
+class ImportAnyMCP(LoggingImportOperator):
     bl_idname = "import_scene.mcp"
-    bl_label = "Import MCP"
+    bl_label = "Import Any MCP"
     bl_description = "Import an MCP file containing MSB navmesh AABBs and connections. Supports DCX-compressed files"
 
     filter_glob: bpy.props.StringProperty(
@@ -197,9 +197,9 @@ class ImportMCP(LoggingImportOperator):
         return {"FINISHED"}
 
 
-class ImportSelectedMapMCP(LoggingOperator):
-    bl_idname = "import_scene.selected_map_mcp"
-    bl_label = "Import MCP"
+class ImportMapMCP(LoggingOperator):
+    bl_idname = "import_scene.map_mcp"
+    bl_label = "Import Map MCP"
     bl_description = "Import MCP file containing MSB navmesh AABBs and connections from selected game map"
 
     def execute(self, context):
@@ -226,7 +226,7 @@ def import_mcp(
 ) -> bpy.types.Object:
     operator.info(f"Importing MCP: {bl_name}")
 
-    operator.to_object_mode()
+    operator.to_object_mode(context)
     operator.deselect_all()
 
     mcp_parent = bpy.data.objects.new(bl_name, None)  # empty parent for all AABB meshes
@@ -234,25 +234,26 @@ def import_mcp(
 
     for i, aabb in enumerate(mcp.aabbs):
         aabb: NavmeshAABB
-        bl_aabb = create_aabb(aabb)
+        bl_aabb = create_aabb(context, aabb)
         bl_aabb.name = f"AABB {i} ({navmesh_part_names[i]})" if navmesh_part_names else f"AABB {i}"
         bl_aabb.parent = mcp_parent
 
     return mcp_parent
 
 
-def create_aabb(aabb: NavmeshAABB):
+def create_aabb(context: bpy.types.Context, aabb: NavmeshAABB):
     """Create an AABB prism representing `aabb`. Position is baked into mesh data fully, just like the navmesh."""
     start_vec = GAME_TO_BL_VECTOR(aabb.aabb_start)
     end_vec = GAME_TO_BL_VECTOR(aabb.aabb_end)
     bpy.ops.mesh.primitive_cube_add()
-    bl_box = bpy.context.active_object
+    bl_box = context.active_object
     # noinspection PyTypeChecker
     box_data = bl_box.data  # type: bpy.types.Mesh
     for vertex in box_data.vertices:
         vertex.co[0] = start_vec.x if vertex.co[0] == -1.0 else end_vec.x
         vertex.co[1] = start_vec.y if vertex.co[1] == -1.0 else end_vec.y
         vertex.co[2] = start_vec.z if vertex.co[2] == -1.0 else end_vec.z
-    bpy.ops.object.modifier_add(type="WIREFRAME")
-    bl_box.modifiers[0].thickness = 0.2
+    # noinspection PyTypeChecker
+    wireframe_mod = bl_box.modifiers.new(name="AABB Wireframe", type="WIREFRAME")  # type: bpy.types.WireframeModifier
+    wireframe_mod.thickness = 0.2
     return bl_box

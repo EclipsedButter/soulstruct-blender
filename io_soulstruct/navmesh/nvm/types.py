@@ -5,6 +5,8 @@ __all__ = [
     "BlenderNVMEventEntity",
 ]
 
+import typing as tp
+
 import numpy as np
 
 import bmesh
@@ -19,10 +21,10 @@ from .properties import *
 from .utilities import set_face_material
 
 
-class BlenderNVM(SoulstructObject[NVM, NVMProps]):
+class BlenderNVM(BaseBlenderSoulstructObject[NVM, NVMProps]):
 
     TYPE = SoulstructType.NAVMESH
-    OBJ_DATA_TYPE = SoulstructDataType.MESH
+    BL_OBJ_TYPE = ObjectType.MESH
     SOULSTRUCT_CLASS = NVM
 
     __slots__ = []
@@ -39,7 +41,7 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
         name: str,
         collection: bpy.types.Collection = None,
     ) -> BlenderNVM:
-        operator.to_object_mode()
+        operator.to_object_mode(context)
         operator.deselect_all()
 
         nvm = soulstruct_obj
@@ -69,7 +71,8 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
             # Get the average position of the faces. This is purely for show and is not exported.
             avg_pos = Vector((0, 0, 0))
             for i in nvm_event.triangle_indices:
-                avg_pos += bm.faces[i].calc_center_median()
+                face = bm.faces[i]
+                avg_pos += face.calc_center_median()
             avg_pos /= len(nvm_event.triangle_indices)
             nvm_event_name = f"{name} Event {nvm_event.entity_id}"
             bl_event = BlenderNVMEventEntity.new_from_soulstruct_obj(
@@ -106,7 +109,7 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
         for face in mesh_data.polygons:
             if len(face.vertices) != 3:
                 raise NVMExportError(
-                    f"Found a non-triangle mesh face in NVM (face {face.index}). You must triangulate it first."
+                    f"Found a non-triangle mesh face in NVM {self.name} (face {face.index}). You must triangulate it."
                 )
             # noinspection PyTypeChecker
             vertices = tuple(face.vertices)  # type: tuple[int, int, int]
@@ -131,7 +134,9 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
             connected_v3 = find_connected_face_index(face[2], face[0], face)
             nvm_connected_face_indices.append((connected_v1, connected_v2, connected_v3))
             if connected_v1 == -1 and connected_v2 == -1 and connected_v3 == -1:
-                operator.warning(f"NVM face {face} appears to have no connected faces, which is very suspicious!")
+                operator.warning(
+                    f"NVM face {face} in '{self.name}' appears to have no connected faces, which is very suspicious!"
+                )
 
         # Create `BMesh` to access custom face layers for `flags` and `obstacle_count`.
         bm = bmesh.new()
@@ -181,7 +186,7 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
 
     def set_face_materials(self, nvm: NVM):
         mesh_data = self.obj.data
-        for bl_tri, nvm_triangle in zip(mesh_data.polygons, nvm.triangles):
+        for bl_tri, nvm_triangle in zip(mesh_data.polygons, nvm.triangles, strict=True):
             set_face_material(mesh_data, bl_tri, nvm_triangle.flags)
 
     def create_nvm_quadtree(
@@ -194,21 +199,54 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
         """
         collection = collection or context.scene.collection
         boxes = []
-        for box, indices in nvm.get_all_boxes(nvm.root_box):
+        for i, (box, indices) in enumerate(nvm.get_all_boxes(nvm.root_box)):
             if not indices:
                 box_name = f"{model_name} Box ROOT"
             else:
                 indices_string = "-".join(str(i) for i in indices)
                 box_name = f"{model_name} Box {indices_string}"
-            bl_box = self.create_box(context, box)
+            bl_box = self.create_box(context, box, i)
             collection.objects.link(bl_box)
             bl_box.name = box_name
             boxes.append(bl_box)
             bl_box.parent = self.obj
         return boxes
 
+    def duplicate(self, collections: tp.Sequence[bpy.types.Collection] = None) -> BlenderNVM:
+        """Duplicate Navmesh model to a new object. Does not rename (will just add duplicate suffix)."""
+        new_model = new_mesh_object(self.name, self.data.copy())
+        new_model.soulstruct_type = SoulstructType.NAVMESH
+        # NOTE: There are currently no properties in the 'NVM' property group.
+        # Face flags and obstacle counts are stored in mesh face data layers.
+        copy_obj_property_group(self.obj, new_model, "NVM")
+        for collection in collections:
+            collection.objects.link(new_model)
+
+        # Copy any NVM Event Entity children of old model.
+        for event_entity in self.get_nvm_event_entities():
+            new_event_obj = event_entity.obj.copy()  # empty object, no data to copy
+            new_event_obj.parent = new_model
+            for collection in collections:
+                collection.objects.link(new_event_obj)
+
+        return self.__class__(new_model)
+
+    def rename(self, new_name: str):
+        """Rename object, data, and event entity children."""
+        old_name = self.name  # TODO: export name?
+        self.obj.name = new_name
+        self.data.name = new_name
+
+        for event_entity in self.get_nvm_event_entities():
+            event_entity.obj.name = event_entity.name.replace(old_name, new_name)
+
+    @property
+    def game_name(self) -> str:
+        """Splits on spaces and periods."""
+        return remove_dupe_suffix(self.obj.name).split(" ")[0].split(".")[0].strip()
+
     @staticmethod
-    def create_box(context: bpy.types.Context, box: NVMBox):
+    def create_box(context: bpy.types.Context, box: NVMBox, index: int):
         """Create an AABB prism representing `box`. Position is baked into mesh data fully, just like the navmesh."""
         start_vec = GAME_TO_BL_VECTOR(box.start_corner)
         end_vec = GAME_TO_BL_VECTOR(box.end_corner)
@@ -220,15 +258,16 @@ class BlenderNVM(SoulstructObject[NVM, NVMProps]):
             vertex.co[0] = start_vec.x if vertex.co[0] == -1.0 else end_vec.x
             vertex.co[1] = start_vec.y if vertex.co[1] == -1.0 else end_vec.y
             vertex.co[2] = start_vec.z if vertex.co[2] == -1.0 else end_vec.z
-        bpy.ops.object.modifier_add(type="WIREFRAME")
-        bl_box.modifiers[0].thickness = 0.02
+        # noinspection PyTypeChecker
+        wireframe_mod = bl_box.modifiers.new(name=f"Box {index}", type="WIREFRAME")  # type: bpy.types.WireframeModifier
+        wireframe_mod.thickness = 0.2
         return bl_box
 
 
-class BlenderNVMEventEntity(SoulstructObject[NVMEventEntity, NVMEventEntityProps]):
+class BlenderNVMEventEntity(BaseBlenderSoulstructObject[NVMEventEntity, NVMEventEntityProps]):
 
     TYPE = SoulstructType.NVM_EVENT_ENTITY
-    OBJ_DATA_TYPE = SoulstructDataType.EMPTY
+    BL_OBJ_TYPE = ObjectType.EMPTY
     SOULSTRUCT_CLASS = NVMEventEntity
 
     __slots__ = []
@@ -236,7 +275,7 @@ class BlenderNVMEventEntity(SoulstructObject[NVMEventEntity, NVMEventEntityProps
     @property
     def entity_id(self) -> int:
         return self.type_properties.entity_id
-    
+
     @entity_id.setter
     def entity_id(self, value: int):
         self.type_properties.entity_id = value
@@ -263,7 +302,7 @@ class BlenderNVMEventEntity(SoulstructObject[NVMEventEntity, NVMEventEntityProps
     ) -> BlenderNVMEventEntity:
         bl_event = cls.new(name, data=None, collection=collection)  # type: BlenderNVMEventEntity
         bl_event.obj.empty_display_type = "CUBE"  # to distinguish it from node spheres
-        
+
         bl_event.obj.location = location or Vector()
         bl_event.entity_id = soulstruct_obj.entity_id
         bl_event.triangle_indices = soulstruct_obj.triangle_indices

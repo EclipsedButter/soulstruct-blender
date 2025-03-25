@@ -27,7 +27,7 @@ class DDSTexture:
 
     # Enum used in `TPFTexture`, which is unfortunately not the same as `DDS` itself.
     # Defaults to 1. Not required by every game, but definitely required in DSR.
-    TPF_TEXTURE_FORMATS: tp.ClassVar[str, int] = {
+    TPF_TEXTURE_FORMATS: tp.ClassVar[dict[str, int]] = {
         "DXT1": 1,
         "BC5_UNORM": 36,
         "BC7_UNORM": 38,
@@ -116,7 +116,6 @@ class DDSTexture:
     @classmethod
     def new_from_image_data(
         cls,
-        operator: LoggingOperator,
         name: str,
         image_format: BlenderImageFormat,
         image_data: bytes,
@@ -136,11 +135,7 @@ class DDSTexture:
             # write_image_path = Path(f"~/AppData/Local/Temp/{image_name}").expanduser()
             write_image_path = Path(tempfile.TemporaryDirectory().name).parent / str(image_name)
             is_temp_image = True
-            if not pack_image_data:
-                operator.warning(
-                    "Must pack image data into Blender file when `image_cache_directory` is not given ('Write Cached "
-                    "Images' disabled)."
-                )
+            # NOTE: We must pack Image data, but we don't warn about the incompatible setting here.
         else:
             write_image_path = image_cache_directory / image_name
             is_temp_image = False
@@ -468,12 +463,19 @@ class DDSTextureCollection(dict[str, DDSTexture]):
         context: bpy.types.Context,
         map_area_dir: Path,
     ) -> list[Binder]:
-        """Load all entries from all TPFBHDs in `map_area_dir`, export given `images` into them as single-DDS TPFs,
-        re-alphabetize the entries, split them into new TPFBHDs (enforcing maximum file-per-BHD limit), and return them
-        for the caller to save.
+        """Export all collected DDS textures into appropriate TPFBHDs in `map_area_dir` (may be project or game).
 
-        Does NOT save the TPFBHDs, to be consistent with the single-TPF and single-TPFBHD exporters above. Caller must
-        do that.
+        Does the follower using `MapAreaTextureManager`:
+            - Load all entries from all TPFBHDs in `map_area_dir` (could be game or project directory).
+            - Add all of collection's images into them as single-DDS TPFs.
+                - If texture export settings do not allow texture overwrite, a `ValueError` will be raised if the
+                  texture already exists in the TPFBHD. This is to protect you from affecting the textures of other
+                  Map Pieces (you must handle these cases with select TPFBHD editing or careful overwrite).
+                - If DDS format is set to 'SAME', try to find existing same-named textures to determine DDS format.
+            - Re-alphabetize all TPF entries and split them into new TPFBHDs (enforcing maximum file-per-Binder limit).
+
+        Returns new `TPFBHD` Binders for the caller to save. Does NOT save them here, to be consistent with the
+        single-TPF and single-TPFBHD exporters above, and give the caller control over the export directories.
         """
         if not self:
             operator.warning("No textures present to export to map area TPFBHDs.")

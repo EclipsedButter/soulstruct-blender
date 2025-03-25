@@ -13,7 +13,8 @@ aid porting.
 from __future__ import annotations
 
 __all__ = [
-    "MSBPartSubtype",
+    "BlenderMSBPartSubtype",
+    "MSBPartArmatureMode",
     "MSBPartProps",
     "MSBMapPieceProps",
     "MSBObjectProps",
@@ -28,14 +29,17 @@ __all__ = [
 
 from enum import StrEnum
 
-from soulstruct.darksouls1ptde.maps.enums import CollisionHitFilter
+import bpy
+
+from soulstruct.base.maps.msb.enums import BaseMSBPartSubtype
 from soulstruct.games import *
 
-import bpy
-from io_soulstruct.types import SoulstructType
+from io_soulstruct.types import SoulstructType, ObjectType
+from io_soulstruct.bpy_base.property_group import SoulstructPropertyGroup
+from .events import BlenderMSBEventSubtype
 
 
-class MSBPartSubtype(StrEnum):
+class BlenderMSBPartSubtype(StrEnum):
     """Union of Part subtypes across all games."""
     MapPiece = "MSB_MAP_PIECE"
     Object = "MSB_OBJECT"
@@ -52,30 +56,54 @@ class MSBPartSubtype(StrEnum):
         return f"{self.value.replace('MSB_', '').replace('_', ' ').title()}"
 
     def is_flver(self) -> bool:
-        return self in {MSBPartSubtype.MapPiece, MSBPartSubtype.Object, MSBPartSubtype.Asset, MSBPartSubtype.Character}
+        return self in {
+            BlenderMSBPartSubtype.MapPiece,
+            BlenderMSBPartSubtype.Object,
+            BlenderMSBPartSubtype.Asset,
+            BlenderMSBPartSubtype.Character,
+        }
 
     def is_map_geometry(self) -> bool:
         """TODO: Asset is ambiguous here. Probably want more enum options."""
-        return self in {MSBPartSubtype.MapPiece, MSBPartSubtype.Collision, MSBPartSubtype.Navmesh}
+        return self in {
+            BlenderMSBPartSubtype.MapPiece,
+            BlenderMSBPartSubtype.Collision,
+            BlenderMSBPartSubtype.Navmesh,
+        }
+
+    @classmethod
+    def from_msb_part_subtype(cls, subtype: BaseMSBPartSubtype) -> BlenderMSBPartSubtype:
+        try:
+            # noinspection PyTypeChecker
+            return cls[subtype.name]
+        except KeyError:
+            raise ValueError(f"Unsupported Blender MSB Part subtype: {subtype}")
+
+
+class MSBPartArmatureMode(StrEnum):
+
+    NEVER = "Never"  # never duplicate
+    CUSTOM_ONLY = "Custom Only"  # duplicate if model has Armature AND model has Custom bone data
+    IF_PRESENT = "If Present"  # duplicate if model has Armature
+    ALWAYS = "Always"  # always duplicate, even if it requires creation of default Armature when model omits it
 
 
 # noinspection PyUnusedLocal
-def _update_part_model(self, context):
+def _update_part_model(self: MSBPartProps, context):
     """Set the data-block of this (Mesh) object to `model.data`."""
     if self.model:
-        if (
-            self.model.type == "MESH"
-            and (
-                self.model.get("MSB_MODEL_PLACEHOLDER", False)
-                or self.model.soulstruct_type in {
-                    SoulstructType.FLVER, SoulstructType.COLLISION, SoulstructType.NAVMESH
-                }
-            )
-        ):
+        if self.model.type == ObjectType.MESH and self.model.soulstruct_type in {
+            SoulstructType.FLVER,
+            SoulstructType.COLLISION,
+            SoulstructType.NAVMESH,
+            SoulstructType.MSB_MODEL_PLACEHOLDER,
+        }:
             # Valid or placeholder model has been set. Link mesh data.
-            self.data = self.model.data
+            self.id_data.data = self.model.data
+            # print(f"INFO: Assigned data of model '{self.model.name}' to Part mesh '{self.id_data.name}'.")
         else:
             # Reject model.
+            # print(f"INFO: Rejected assignment of model '{self.model.name}' to Part mesh '{self.id_data.name}'.")
             self.model = None  # will not cause this `if` block to recur
 
 
@@ -91,48 +119,136 @@ def _is_part(_, obj: bpy.types.Object):
 
 
 def _is_collision(_, obj: bpy.types.Object):
-    return obj.soulstruct_type == SoulstructType.MSB_PART and obj.MSB_PART.part_subtype_enum == MSBPartSubtype.Collision
+    return (
+        obj.soulstruct_type == SoulstructType.MSB_PART
+        and obj.MSB_PART.entry_subtype_enum == BlenderMSBPartSubtype.Collision
+    )
 
 
 def _is_region(_, obj: bpy.types.Object):
     return obj.soulstruct_type == SoulstructType.MSB_REGION
 
 
-class MSBPartProps(bpy.types.PropertyGroup):
-    part_subtype: bpy.props.EnumProperty(
+def _is_environment_event(_, obj: bpy.types.Object):
+    return (
+        obj.soulstruct_type == SoulstructType.MSB_EVENT
+        and obj.MSB_EVENT.entry_subtype == BlenderMSBEventSubtype.Environment
+    )
+
+
+def _is_model(_, obj: bpy.types.Object):
+    """Only allow models that are FLVER, COLLISION, NAVMESH, or MSB_MODEL_PLACEHOLDER Mesh objects."""
+    return (
+        obj.type == "MESH" and obj.soulstruct_type in {
+            SoulstructType.FLVER, SoulstructType.COLLISION, SoulstructType.NAVMESH, SoulstructType.MSB_MODEL_PLACEHOLDER
+        }
+    )
+
+
+class MSBPartProps(SoulstructPropertyGroup):
+    """Properties for MSB Parts."""
+
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "entry_subtype",
+
+            "model",
+            "entity_id",
+            "draw_groups_0",
+            "draw_groups_1",
+            "draw_groups_2",
+            "draw_groups_3",
+            "display_groups_0",
+            "display_groups_1",
+            "display_groups_2",
+            "display_groups_3",
+            "ambient_light_id",
+            "fog_id",
+            "scattered_light_id",
+            "lens_flare_id",
+            "shadow_id",
+            "dof_id",
+            "tone_map_id",
+            "point_light_id",
+            "tone_correction_id",
+            "lod_id",
+            "unk_x0e",
+            "is_shadow_source",
+            "is_shadow_destination",
+            "is_shadow_only",
+            "draw_by_reflect_cam",
+            "draw_only_reflect_cam",
+            "use_depth_bias_float",
+            "disable_point_light_effect",
+        ),
+        DARK_SOULS_PTDE: (
+            "entry_subtype",
+
+            "model",
+            "entity_id",
+            "draw_groups_0",
+            "draw_groups_1",
+            "draw_groups_2",
+            "draw_groups_3",
+            "display_groups_0",
+            "display_groups_1",
+            "display_groups_2",
+            "display_groups_3",
+            "ambient_light_id",
+            "fog_id",
+            "scattered_light_id",
+            "lens_flare_id",
+            "shadow_id",
+            "dof_id",
+            "tone_map_id",
+            "point_light_id",
+            "tone_correction_id",
+            "lod_id",
+            "is_shadow_source",
+            "is_shadow_destination",
+            "is_shadow_only",
+            "draw_by_reflect_cam",
+            "draw_only_reflect_cam",
+            "use_depth_bias_float",
+            "disable_point_light_effect",
+        ),
+    }
+
+    entry_subtype: bpy.props.EnumProperty(
         name="Part Subtype",
         description="MSB subtype of this Part object",
         items=[
             ("NONE", "None", "Not an MSB Part"),
-            (MSBPartSubtype.MapPiece, "Map Piece", "MSB MapPiece object"),
-            (MSBPartSubtype.Object, "Object", "MSB Object object"),
-            (MSBPartSubtype.Asset, "Asset", "MSB Asset object"),
-            (MSBPartSubtype.Character, "Character", "MSB Character object"),
-            (MSBPartSubtype.PlayerStart, "Player Start", "MSB PlayerStart object"),
-            (MSBPartSubtype.Collision, "Collision", "MSB Collision object"),
-            (MSBPartSubtype.Protoboss, "Protoboss", "MSB Protoboss object (DeS only)"),
-            (MSBPartSubtype.Navmesh, "Navmesh", "MSB Navmesh object"),
-            (MSBPartSubtype.ConnectCollision, "Connect Collision", "MSB Connect Collision object"),
-            (MSBPartSubtype.Other, "Other", "MSB Other object"),
+            (BlenderMSBPartSubtype.MapPiece, "Map Piece", "MSB MapPiece object"),
+            (BlenderMSBPartSubtype.Object, "Object", "MSB Object object"),
+            (BlenderMSBPartSubtype.Asset, "Asset", "MSB Asset object"),
+            (BlenderMSBPartSubtype.Character, "Character", "MSB Character object"),
+            (BlenderMSBPartSubtype.PlayerStart, "Player Start", "MSB PlayerStart object"),
+            (BlenderMSBPartSubtype.Collision, "Collision", "MSB Collision object"),
+            (BlenderMSBPartSubtype.Protoboss, "Protoboss", "MSB Protoboss object (DeS only)"),
+            (BlenderMSBPartSubtype.Navmesh, "Navmesh", "MSB Navmesh object"),
+            (BlenderMSBPartSubtype.ConnectCollision, "Connect Collision", "MSB Connect Collision object"),
+            (BlenderMSBPartSubtype.Other, "Other", "MSB Other object"),
         ],
         default="NONE",
     )
 
     @property
-    def part_subtype_enum(self) -> MSBPartSubtype:
-        if self.part_subtype == "NONE":
+    def entry_subtype_enum(self) -> BlenderMSBPartSubtype:
+        if self.entry_subtype == "NONE":
             raise ValueError("MSB Part subtype is not set.")
-        return MSBPartSubtype(self.part_subtype)
+        return BlenderMSBPartSubtype(self.entry_subtype)
+
+    def is_subtype(self, subtype: BlenderMSBPartSubtype | str):
+        if isinstance(subtype, str):
+            return self.entry_subtype == subtype
+        return self.entry_subtype == subtype.value
 
     model: bpy.props.PointerProperty(
         name="Model",
         type=bpy.types.Object,  # could be Armature or Mesh
         description="Source model of this MSB Part instance",
-
-        # Only Mesh objects are supported as models.
-        poll=lambda self, obj: obj.type == "MESH",
-
-        # On update, validate Soulstruct type and set the data-block of this (Mesh) object to `model.data`.
+        poll=_is_model,
         update=_update_part_model,
     )
 
@@ -167,14 +283,34 @@ class MSBPartProps(bpy.types.PropertyGroup):
         size=32,
         default=[False] * 32,
     )
-
-    def get_draw_groups_props_128(self) -> list[bpy.props.BoolVectorProperty]:
-        return [
-            self.draw_groups_0,
-            self.draw_groups_1,
-            self.draw_groups_2,
-            self.draw_groups_3,
-        ]
+    draw_groups_4: bpy.props.BoolVectorProperty(
+        name="Draw Groups [128, 159]",
+        description="Draw groups for this MSB Part object. Parts with draw groups that overlap the display groups of "
+                    "the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
+    draw_groups_5: bpy.props.BoolVectorProperty(
+        name="Draw Groups [160, 191]",
+        description="Draw groups for this MSB Part object. Parts with draw groups that overlap the display groups of "
+                    "the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
+    draw_groups_6: bpy.props.BoolVectorProperty(
+        name="Draw Groups [192, 223]",
+        description="Draw groups for this MSB Part object. Parts with draw groups that overlap the display groups of "
+                    "the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
+    draw_groups_7: bpy.props.BoolVectorProperty(
+        name="Draw Groups [224, 255]",
+        description="Draw groups for this MSB Part object. Parts with draw groups that overlap the display groups of "
+                    "the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
 
     display_groups_0: bpy.props.BoolVectorProperty(
         name="Display Groups [0, 31]",
@@ -204,14 +340,34 @@ class MSBPartProps(bpy.types.PropertyGroup):
         size=32,
         default=[False] * 32,
     )
-
-    def get_display_groups_props_128(self) -> list[bpy.props.BoolVectorProperty]:
-        return [
-            self.display_groups_0,
-            self.display_groups_1,
-            self.display_groups_2,
-            self.display_groups_3,
-        ]
+    display_groups_4: bpy.props.BoolVectorProperty(
+        name="Display Groups [128, 159]",
+        description="Display groups for this MSB Part object. Only used by Collisions. Parts with draw groups that "
+                    "overlap the display groups of the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
+    display_groups_5: bpy.props.BoolVectorProperty(
+        name="Display Groups [160, 191]",
+        description="Display groups for this MSB Part object. Only used by Collisions. Parts with draw groups that "
+                    "overlap the display groups of the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
+    display_groups_6: bpy.props.BoolVectorProperty(
+        name="Display Groups [192, 223]",
+        description="Display groups for this MSB Part object. Only used by Collisions. Parts with draw groups that "
+                    "overlap the display groups of the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
+    display_groups_7: bpy.props.BoolVectorProperty(
+        name="Display Groups [224, 255]",
+        description="Display groups for this MSB Part object. Only used by Collisions. Parts with draw groups that "
+                    "overlap the display groups of the player's current Collision will be drawn or active in the map",
+        size=32,
+        default=[False] * 32,
+    )
 
     ambient_light_id: bpy.props.IntProperty(
         name="Ambient Light (Light Bank) ID",
@@ -322,21 +478,34 @@ class MSBPartProps(bpy.types.PropertyGroup):
         "disable_point_light_effect",
     )
 
-    def get_game_props(self, game: Game) -> list[str]:
-        if game is DARK_SOULS_DSR or game is DARK_SOULS_PTDE:
-            return [
-                p for p in self.__annotations__
-                if p != "unk_x0e"
-            ]
-        return list(self.__annotations__)
 
-
-class MSBMapPieceProps(bpy.types.PropertyGroup):
+class MSBMapPieceProps(SoulstructPropertyGroup):
     """No additional properties."""
     pass
 
 
-class MSBObjectProps(bpy.types.PropertyGroup):
+class MSBObjectProps(SoulstructPropertyGroup):
+
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "is_dummy",
+            "break_term",
+            "net_sync_type",
+            "default_animation",
+            "unk_x0e",
+            "unk_x10",
+        ),
+        DARK_SOULS_PTDE: (
+            "is_dummy",
+            "draw_parent",
+            "break_term",
+            "net_sync_type",
+            "default_animation",
+            "unk_x0e",
+            "unk_x10",
+        ),
+    }
+
     is_dummy: bpy.props.BoolProperty(
         name="Is Dummy",
         description="If enabled, this object will be written to MSB as a Dummy object, which is not loaded "
@@ -346,6 +515,7 @@ class MSBObjectProps(bpy.types.PropertyGroup):
     draw_parent: bpy.props.PointerProperty(
         name="Draw Parent",
         type=bpy.types.Object,
+        poll=_is_part,
     )
     break_term: bpy.props.IntProperty(
         name="Break Term",
@@ -369,16 +539,16 @@ class MSBObjectProps(bpy.types.PropertyGroup):
         default=0,
     )
 
-    def get_game_props(self, game: Game) -> list[str]:
-        if game is DEMONS_SOULS:
-            return [
-                p for p in self.__annotations__
-                if p != "draw_parent"
-            ]
-        return list(self.__annotations__)
 
+class MSBAssetProps(SoulstructPropertyGroup):
 
-class MSBAssetProps(bpy.types.PropertyGroup):
+    GAME_PROP_NAMES = {
+        ELDEN_RING: (
+            "is_dummy",
+            "draw_parent",
+        ),
+    }
+
     is_dummy: bpy.props.BoolProperty(
         name="Is Dummy",
         description="If enabled, this Asset will be written to MSB as a Dummy Asset, which is not loaded "
@@ -388,11 +558,56 @@ class MSBAssetProps(bpy.types.PropertyGroup):
     draw_parent: bpy.props.PointerProperty(
         name="Draw Parent",
         type=bpy.types.Object,
+        poll=_is_part,
     )
     # TODO: Elden Ring Asset properties.
 
 
-class MSBCharacterProps(bpy.types.PropertyGroup):
+class MSBCharacterProps(SoulstructPropertyGroup):
+
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "character_id",
+            "talk_id",
+            "platoon_id",
+            "patrol_type",
+            "player_id",
+            "draw_parent",
+            "patrol_regions_0",
+            "patrol_regions_1",
+            "patrol_regions_2",
+            "patrol_regions_3",
+            "patrol_regions_4",
+            "patrol_regions_5",
+            "patrol_regions_6",
+            "patrol_regions_7",
+            "default_animation",
+            "damage_animation",
+            "unk_x00",
+            "unk_x04",
+            "unk_x08",
+        ),
+        DARK_SOULS_PTDE: (
+            "ai_id",
+            "character_id",
+            "talk_id",
+            "platoon_id",
+            "patrol_type",
+            "player_id",
+            "draw_parent",
+            "patrol_regions_0",
+            "patrol_regions_1",
+            "patrol_regions_2",
+            "patrol_regions_3",
+            "patrol_regions_4",
+            "patrol_regions_5",
+            "patrol_regions_6",
+            "patrol_regions_7",
+            "default_animation",
+            "damage_animation",
+        ),
+    }
+
     is_dummy: bpy.props.BoolProperty(
         name="Is Dummy",
         description="If enabled, this character will be written to MSB as a Dummy character, which is not loaded "
@@ -402,6 +617,7 @@ class MSBCharacterProps(bpy.types.PropertyGroup):
     draw_parent: bpy.props.PointerProperty(
         name="Draw Parent",
         type=bpy.types.Object,
+        poll=_is_part,
     )
     ai_id: bpy.props.IntProperty(
         name="AI (NpcThinkParam) ID",
@@ -433,41 +649,49 @@ class MSBCharacterProps(bpy.types.PropertyGroup):
         type=bpy.types.Object,
         name="Patrol Region 0",
         description="Patrol region 0 for character",
+        poll=_is_region,
     )
     patrol_regions_1: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 1",
         description="Patrol region 1 for character",
+        poll=_is_region,
     )
     patrol_regions_2: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 2",
         description="Patrol region 2 for character",
+        poll=_is_region,
     )
     patrol_regions_3: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 3",
         description="Patrol region 3 for character",
+        poll=_is_region,
     )
     patrol_regions_4: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 4",
         description="Patrol region 4 for character",
+        poll=_is_region,
     )
     patrol_regions_5: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 5",
         description="Patrol region 5 for character",
+        poll=_is_region,
     )
     patrol_regions_6: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 6",
         description="Patrol region 6 for character",
+        poll=_is_region,
     )
     patrol_regions_7: bpy.props.PointerProperty(
         type=bpy.types.Object,
         name="Patrol Region 7",
         description="Patrol region 7 for character",
+        poll=_is_region,
     )
 
     def get_patrol_regions(self) -> list[bpy.types.Object | None]:
@@ -530,16 +754,15 @@ class MSBCharacterProps(bpy.types.PropertyGroup):
         "damage_animation",
     )
 
-    def get_game_props(self, game: Game) -> list[str]:
-        if game is DEMONS_SOULS:
-            return [
-                p for p in self.__annotations__
-                if p != "ai_id"
-            ]
-        return list(self.__annotations__)
 
+class MSBPlayerStartProps(SoulstructPropertyGroup):
 
-class MSBPlayerStartProps(bpy.types.PropertyGroup):
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "unk_x00",
+        ),
+        DARK_SOULS_PTDE: (),
+    }
 
     unk_x00: bpy.props.IntProperty(
         name="Unknown x00 (DeS)",
@@ -547,14 +770,89 @@ class MSBPlayerStartProps(bpy.types.PropertyGroup):
         default=0,
     )
 
-    def get_game_props(self, game: Game) -> list[str]:
-        if game is not DEMONS_SOULS:
-            return []
 
-        return list(self.__annotations__)
+class BlenderMSBCollisionHitFilter(StrEnum):
+    """Union of all `CollisionHitFilter` enum NAMES across games.
+
+    These names are resolved to integer values by each game-specific MSB Collision object.
+    """
+    NoHiHitNoFeetIK = "NoHiHitNoFeetIK"  # 0  # solid
+    NoHiHit_1 = "NoHiHit_1"  # 1  # solid
+    NoHiHit_2 = "NoHiHit_2"  # 2  # solid
+    NoHiHit_3 = "NoHiHit_3"  # 3  # solid
+    NoHiHit_4 = "NoHiHit_4"  # 4  # solid
+    NoHiHit_5 = "NoHiHit_5"  # 5  # solid
+    NoHiHit_6 = "NoHiHit_6"  # 6  # solid
+    NoHiHit_7 = "NoHiHit_7"  # 7  # solid
+    Normal = "Normal"  # 8  # solid
+    Water_A = "Water_A"  # 9  # blue
+    Unknown_10 = "Unknown_10"  # 10
+    Solid_ForNPCsOnly_A = "Solid_ForNPCsOnly_A"  # 11  # blue
+    Unknown_12 = "Unknown_12"  # 12
+    DeathCam = "DeathCam"  # 13  # white
+    LethalFall = "LethalFall"  # 14  # red
+    KillPlane = "KillPlane"  # 15  # black
+    Water_B = "Water_B"  # 16  # dark blue
+    GroupSwitch = "GroupSwitch"  # 17  # turquoise; in elevator shafts
+    Unknown_18 = "Unknown_18"  # 18
+    Solid_ForNPCsOnly_B = "Solid_ForNPCsOnly_B"  # 19  # turquoise
+    LevelExit_A = "LevelExit_A"  # 20  # purple
+    Slide = "Slide"  # 21  # yellow
+    FallProtection = "FallProtection"  # 22  # permeable for projectiles
+    LevelExit_B = "LevelExit_B"  # 23  # glowing turquoise
 
 
-class MSBCollisionProps(bpy.types.PropertyGroup):
+class MSBCollisionProps(SoulstructPropertyGroup):
+
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "hit_filter_id",
+            "sound_space_type",
+            "cubemap_index",
+            "reflect_plane_height",
+            "navmesh_groups",
+            "ref_tex_ids_0",
+            "ref_tex_ids_1",
+            "ref_tex_ids_2",
+            "ref_tex_ids_3",
+            "ref_tex_ids_4",
+            "ref_tex_ids_5",
+            "ref_tex_ids_6",
+            "ref_tex_ids_7",
+            "ref_tex_ids_8",
+            "ref_tex_ids_9",
+            "ref_tex_ids_10",
+            "ref_tex_ids_11",
+            "ref_tex_ids_12",
+            "ref_tex_ids_13",
+            "ref_tex_ids_14",
+            "ref_tex_ids_15",
+            "unk_x38",
+            "place_name_banner_id",
+            "force_place_name_banner",
+        ),
+        DARK_SOULS_PTDE: (
+            "hit_filter_id",
+            "sound_space_type",
+            "environment_event",
+            "reflect_plane_height",
+            "navmesh_groups_0",
+            "navmesh_groups_1",
+            "navmesh_groups_2",
+            "navmesh_groups_3",
+            "vagrant_entity_ids",
+            "place_name_banner_id",
+            "force_place_name_banner",
+            "starts_disabled",
+            "play_region_id",
+            "stable_footing_flag",
+            "camera_1_id",
+            "camera_2_id",
+            "unk_x27_x28",
+            "attached_bonfire",
+        )
+    }
+
     navmesh_groups_0: bpy.props.BoolVectorProperty(
         name="Navmesh Groups [0, 31]",
         description="Navmesh groups for this Collision. These should match the navmesh groups of corresponding Navmesh "
@@ -584,44 +882,24 @@ class MSBCollisionProps(bpy.types.PropertyGroup):
         default=[False] * 32,
     )
 
-    def get_navmesh_groups_props_128(self) -> list[bpy.props.BoolVectorProperty]:
-        return [
-            self.navmesh_groups_0,
-            self.navmesh_groups_1,
-            self.navmesh_groups_2,
-            self.navmesh_groups_3,
-        ]
+    def get_navmesh_groups_props(self, bit_count: int) -> list[bpy.types.CollectionProperty]:
+        """Get the appropriate number of navmesh group properties for the given bit count (always 128).
+        """
+        if bit_count == 128:
+            return [
+                self.navmesh_groups_0,
+                self.navmesh_groups_1,
+                self.navmesh_groups_2,
+                self.navmesh_groups_3,
+            ]
+        raise ValueError(f"Invalid MSB Part navmesh group bit count: {bit_count}. Must be 128.")
 
+    # TODO: Currently uses enum from DeS/DS1. With later games, will probably need separate enum properties.
     hit_filter: bpy.props.EnumProperty(
         name="Hit Filter Name",
         description="Determines effect of collision on characters",
-        items=[
-            (CollisionHitFilter.NoHiHitNoFeetIK.name, "NoHiHitNoFeetIK", "NoHiHitNoFeetIK"),  # solid
-            (CollisionHitFilter.NoHiHit_1.name, "NoHiHit_1", "NoHiHit_1"),  # solid
-            (CollisionHitFilter.NoHiHit_2.name, "NoHiHit_2", "NoHiHit_2"),  # solid
-            (CollisionHitFilter.NoHiHit_3.name, "NoHiHit_3", "NoHiHit_3"),  # solid
-            (CollisionHitFilter.NoHiHit_4.name, "NoHiHit_4", "NoHiHit_4"),  # solid
-            (CollisionHitFilter.NoHiHit_5.name, "NoHiHit_5", "NoHiHit_5"),  # solid
-            (CollisionHitFilter.NoHiHit_6.name, "NoHiHit_6", "NoHiHit_6"),  # solid
-            (CollisionHitFilter.NoHiHit_7.name, "NoHiHit_7", "NoHiHit_7"),  # solid
-            (CollisionHitFilter.Normal.name, "Normal", "Normal"),  # solid
-            (CollisionHitFilter.Water_A.name, "Water_A", "Water_A"),  # blue
-            (CollisionHitFilter.Unknown_10.name, "Unknown_10", "Unknown_10"),
-            (CollisionHitFilter.Solid_ForNPCsOnly_A.name, "Solid_ForNPCsOnly_A", "Solid_ForNPCsOnly_A"),  # blue
-            (CollisionHitFilter.Unknown_12.name, "Unknown_12", "Unknown_12"),
-            (CollisionHitFilter.DeathCam.name, "DeathCam", "DeathCam"),  # white
-            (CollisionHitFilter.LethalFall.name, "LethalFall", "LethalFall"),  # red
-            (CollisionHitFilter.KillPlane.name, "KillPlane", "KillPlane"),  # black
-            (CollisionHitFilter.Water_B.name, "Water_B", "Water_B"),  # dark blue
-            (CollisionHitFilter.GroupSwitch.name, "GroupSwitch", "GroupSwitch"),  # turquoise; in elevator shafts
-            (CollisionHitFilter.Unknown_18.name, "Unknown_18", "Unknown_18"),
-            (CollisionHitFilter.Solid_ForNPCsOnly_B.name, "Solid_ForNPCsOnly_B", "Solid_ForNPCsOnly_B"),  # turquoise
-            (CollisionHitFilter.LevelExit_A.name, "LevelExit_A", "LevelExit_A"),  # purple
-            (CollisionHitFilter.Slide.name, "Slide", "Slide"),  # yellow
-            (CollisionHitFilter.FallProtection.name, "FallProtection", "FallProtection"),  # permeable for projectiles
-            (CollisionHitFilter.LevelExit_B.name, "LevelExit_B", "LevelExit_B"),  # glowing turquoise
-        ],
-        default=CollisionHitFilter.Normal.name,
+        items=[(h, h, h) for h in BlenderMSBCollisionHitFilter],
+        default=BlenderMSBCollisionHitFilter.Normal,
     )
     sound_space_type: bpy.props.IntProperty(
         name="Sound Space Type",
@@ -682,7 +960,14 @@ class MSBCollisionProps(bpy.types.PropertyGroup):
         default=0,
         min=0,
     )
-    # NOTE: `environment_event` is not maintained in Blender. We just find the Environment event that references this.
+    # NOTE: This property is set AFTER full MSB import out of necessity.
+    environment_event: bpy.props.PointerProperty(
+        type=bpy.types.Object,
+        name="Environment Event",
+        description="Environment ('GI') event that describes the lighting cubemaps used on this collision. That "
+                    "same event will almost always be attached to this collision",
+        poll=_is_environment_event,
+    )
     reflect_plane_height: bpy.props.FloatProperty(
         name="Reflect Plane Height",
         description="Height of the reflection plane for this collision, used for water reflections",
@@ -707,10 +992,15 @@ class MSBCollisionProps(bpy.types.PropertyGroup):
         min=-1,
     )
 
-    def get_vagrant_entity_ids(self) -> list[int]:
-        return [
-            self.vagrant_entity_ids_0, self.vagrant_entity_ids_1, self.vagrant_entity_ids_2
-        ]
+    @property
+    def vagrant_entity_ids(self) -> list[int]:
+        return [self.vagrant_entity_ids_0, self.vagrant_entity_ids_1, self.vagrant_entity_ids_2]
+
+    @vagrant_entity_ids.setter
+    def vagrant_entity_ids(self, value: list[int]):
+        if len(value) != 3:
+            raise ValueError("Vagrant entity IDs must be a list of length 3.")
+        self.vagrant_entity_ids_0, self.vagrant_entity_ids_1, self.vagrant_entity_ids_2 = value
 
     starts_disabled: bpy.props.BoolProperty(
         name="Starts Disabled",
@@ -815,8 +1105,16 @@ class MSBCollisionProps(bpy.types.PropertyGroup):
         default=0,
     )
 
-    def get_ref_tex_ids(self) -> list[int]:
+    @property
+    def ref_tex_ids(self):
         return [getattr(self, f"ref_tex_ids_{i}") for i in range(16)]
+
+    @ref_tex_ids.setter
+    def ref_tex_ids(self, value: list[int]):
+        if len(value) != 16:
+            raise ValueError("Ref Tex IDs (DeS only) must be a list of length 16.")
+        for i, v in enumerate(value):
+            setattr(self, f"ref_tex_ids_{i}", v)
 
     unk_x38: bpy.props.IntProperty(
         name="Unknown x38 (DeS)",
@@ -824,40 +1122,27 @@ class MSBCollisionProps(bpy.types.PropertyGroup):
         default=0,
     )
 
-    def get_game_props(self, game: Game) -> list[str]:
-        if game is DEMONS_SOULS:
-            exclude = {
-                "play_region_id",
-                "stable_footing_flag",
-                "camera_1_id",
-                "camera_2_id",
-                "unk_x27_x28",
-                "attached_bonfire",
-                "vagrant_entity_ids_0",
-                "vagrant_entity_ids_1",
-                "vagrant_entity_ids_2",
-                "starts_disabled",
-            }
-            return [
-                p for p in self.__annotations__
-                if p not in exclude
-            ]
-        elif game is DARK_SOULS_PTDE or game is DARK_SOULS_DSR:
-            exclude = {
-                "unk_x38",
-                "cubemap_index",
-            }
-            return [
-                p for p in self.__annotations__
-                if not p.startswith("ref_tex_ids")
-                if p not in exclude
-            ]
 
-        return list(self.__annotations__)
-
-
-class MSBProtobossProps(bpy.types.PropertyGroup):
+class MSBProtobossProps(SoulstructPropertyGroup):
     """Only used in Demon's Souls, but doesn't appear in any final MSB files. TODO."""
+
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "unk_x00",
+            "unk_x04",
+            "unk_x08",
+            "unk_x0c",
+            "unk_x10",
+            "unk_x14",
+            "unk_x18",
+            "unk_x1c",
+            "unk_x20",
+            "unk_x24",
+            "unk_x28",
+            "unk_x2c",
+            "unk_x30",
+        ),
+    }
 
     unk_x00: bpy.props.FloatProperty(
         name="Unk x00",
@@ -926,7 +1211,23 @@ class MSBProtobossProps(bpy.types.PropertyGroup):
     )
 
 
-class MSBNavmeshProps(bpy.types.PropertyGroup):
+class MSBNavmeshProps(SoulstructPropertyGroup):
+
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "navmesh_groups_0",
+            "navmesh_groups_1",
+            "navmesh_groups_2",
+            "navmesh_groups_3",
+        ),
+        DARK_SOULS_PTDE: (
+            "navmesh_groups_0",
+            "navmesh_groups_1",
+            "navmesh_groups_2",
+            "navmesh_groups_3",
+        ),
+    }
+
     navmesh_groups_0: bpy.props.BoolVectorProperty(
         name="Navmesh Groups [0, 31]",
         description="Navmesh groups for this Navmesh. These should match the navmesh groups of corresponding Collision "
@@ -956,53 +1257,44 @@ class MSBNavmeshProps(bpy.types.PropertyGroup):
         default=[False] * 32,
     )
 
-    def get_navmesh_groups_props_128(self) -> list[bpy.props.BoolVectorProperty]:
-        return [
-            self.navmesh_groups_0,
-            self.navmesh_groups_1,
-            self.navmesh_groups_2,
-            self.navmesh_groups_3,
-        ]
+    def get_navmesh_groups_props(self, bit_count: int) -> list[bpy.types.CollectionProperty]:
+        """Get the appropriate number of navmesh group properties for the given bit count (always 128).
+        """
+        if bit_count == 128:
+            return [
+                self.navmesh_groups_0,
+                self.navmesh_groups_1,
+                self.navmesh_groups_2,
+                self.navmesh_groups_3,
+            ]
+        raise ValueError(f"Invalid MSB Part navmesh group bit count: {bit_count}. Must be 128.")
 
-    def get_game_props(self, game: Game) -> list[str]:
-        return list(self.__annotations__)
 
+class MSBConnectCollisionProps(SoulstructPropertyGroup):
 
-class MSBConnectCollisionProps(bpy.types.PropertyGroup):
+    GAME_PROP_NAMES = {
+        DEMONS_SOULS: (
+            "collision",
+            "connected_map_id",
+        ),
+        DARK_SOULS_PTDE: (
+            "collision",
+            "connected_map_id",
+        ),
+    }
+
     collision: bpy.props.PointerProperty(
         name="Collision Part",
         description="Collision part to which this Connect Collision is attached",
         type=bpy.types.Object,
         poll=_is_collision,
     )
-    map_area: bpy.props.IntProperty(
-        name="Connected Map Area",
-        description="Area ID of the connected map ('AA' from mAA_BB_CC_DD)",
-        default=0,
-        min=0,
-        max=99,
-    )
-    map_block: bpy.props.IntProperty(
-        name="Connected Map Block",
-        description="Block ID of the connected map ('BB' from mAA_BB_CC_DD). Can be -1",
-        default=-1,
-        min=-1,
-        max=99,
-    )
-    map_cc: bpy.props.IntProperty(
-        name="Connected Map CC",
-        description="CC ID of the connected map (from mAA_BB_CC_DD). Can be -1",
-        default=-1,
-        min=-1,
-        max=99,
-    )
-    map_dd: bpy.props.IntProperty(
-        name="Connected Map DD",
-        description="DD ID of the connected map (from mAA_BB_CC_DD). Can be -1",
-        default=-1,
-        min=-1,
-        max=99,
-    )
 
-    def get_game_props(self, game: Game) -> list[str]:
-        return list(self.__annotations__)
+    connected_map_id: bpy.props.IntVectorProperty(
+        name="Connected Map",
+        description="Four-part map ID of the connected map (mAA_BB_CC_DD). -1 can be used instead of 0",
+        default=(0, -1, -1, -1),
+        min=-1,
+        max=99,
+        size=4,
+    )

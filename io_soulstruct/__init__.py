@@ -34,15 +34,20 @@ def try_reload(_module_name: str):
 # Reload all Soulstruct modules, then all modules in this add-on (except this script).
 # NOTE: This is IMPORTANT when using 'Reload Scripts' in Blender, as it is otherwise prone to partial re-imports of
 # Soulstruct that duplicate classes and cause wild bugs with `isinstance`, object ID equality, etc.
-for module_name in list(sys.modules.keys()):
-    if "io_soulstruct" not in module_name and "soulstruct" in module_name.split(".")[0]:
-        try_reload(module_name)
+
+# TODO: `soulstruct` reload doesn't seem to be complete; `Vector has no attribute 'ndim'` appears.
+# for module_name in list(sys.modules.keys()):
+#     if "io_soulstruct" not in module_name and "soulstruct" in module_name.split(".")[0]:
+#         try_reload(module_name)
+
 for module_name in list(sys.modules.keys()):
     if module_name != "io_soulstruct" and "io_soulstruct" in module_name.split(".")[0]:  # don't reload THIS module
         try_reload(module_name)
 
+import io_soulstruct._logging
+
 from io_soulstruct.general import *
-from io_soulstruct.misc_operators import *
+from io_soulstruct.misc import *
 
 from io_soulstruct.animation import *
 from io_soulstruct.collision import *
@@ -51,14 +56,15 @@ from io_soulstruct.flver import *
 from io_soulstruct.msb import *
 from io_soulstruct.nav_graph import *
 from io_soulstruct.navmesh import *
-from io_soulstruct.types import SoulstructType
+from io_soulstruct.types import SoulstructType, SoulstructCollectionType
+from io_soulstruct.utilities import ViewSelectedAtDistanceZero
 
 
 bl_info = {
     "name": "Soulstruct",
     "author": "Scott Mooney (Grimrukh)",
-    "version": (2, 1, 9),
-    "blender": (4, 2, 0),
+    "version": (2, 4, 0),
+    "blender": (4, 3, 0),
     "location": "File > Import-Export",
     "description": "Import, manipulate, and export FromSoftware/Havok assets",
     "warning": "",
@@ -75,17 +81,17 @@ bl_info = {
 def menu_func_import(self, context):
     layout = self.layout
     layout.operator(ImportFLVER.bl_idname, text="FLVER (.flver/.*bnd)")
-    layout.operator(ImportNVM.bl_idname, text="NVM (.nvm/.nvmbnd)")
-    layout.operator(ImportMCG.bl_idname, text="MCG (.mcg)")
+    layout.operator(ImportAnyNVM.bl_idname, text="NVM (.nvm/.nvmbnd)")
+    layout.operator(ImportAnyMCG.bl_idname, text="MCG (.mcg)")
 
 
 # noinspection PyUnusedLocal
 def menu_func_export(self, context):
     layout = self.layout
-    layout.operator(ExportLooseFLVER.bl_idname, text="FLVER (.flver)")
-    layout.operator(ExportFLVERIntoBinder.bl_idname, text="FLVER to Binder (.*bnd)")
-    layout.operator(ExportLooseNVM.bl_idname, text="NVM (.nvm)")
-    layout.operator(ExportNVMIntoBinder.bl_idname, text="NVM to Binder (.nvmbnd)")
+    layout.operator(ExportAnyFLVER.bl_idname, text="FLVER (.flver)")
+    layout.operator(ExportFLVERIntoAnyBinder.bl_idname, text="FLVER to Binder (.*bnd)")
+    layout.operator(ExportAnyNVM.bl_idname, text="NVM (.nvm)")
+    layout.operator(ExportNVMIntoAnyBinder.bl_idname, text="NVM to Binder (.nvmbnd)")
 
 
 # noinspection PyUnusedLocal
@@ -108,12 +114,6 @@ CLASSES = (
     LoadCollectionsFromBlend,
     # endregion
 
-    # region Misc. Operators
-    MeshMoveSettings,
-    CopyMeshSelectionOperator,
-    CutMeshSelectionOperator,
-    # endregion
-
     # region FLVER / Materials / Textures
     ImportFLVER,
     ImportMapPieceFLVER,
@@ -125,11 +125,10 @@ CLASSES = (
 
     HideAllDummiesOperator,
     ShowAllDummiesOperator,
-    PrintGameTransform,
 
     FLVERExportSettings,
-    ExportLooseFLVER,
-    ExportFLVERIntoBinder,
+    ExportAnyFLVER,
+    ExportFLVERIntoAnyBinder,
     ExportMapPieceFLVERs,
     ExportCharacterFLVER,
     ExportObjectFLVER,
@@ -145,21 +144,26 @@ CLASSES = (
     CopyToNewFLVER,
     RenameFLVER,
     SelectDisplayMaskID,
+    SelectUnweightedVertices,
     SetSmoothCustomNormals,
     SetVertexAlpha,
     InvertVertexAlpha,
     BakeBonePoseToVertices,
     ReboneVertices,
-    ActivateUVTexture0,
-    ActivateUVTexture1,
-    ActiveUVLightmap,
+    ActivateUVMap,
     FastUVUnwrap,
+    FastUVUnwrapIslands,
+    RotateUVMapClockwise90,
+    RotateUVMapCounterClockwise90,
     FindMissingTexturesInImageCache,
     SelectMeshChildren,
 
+    FLVERMaterialSettings,
     MaterialToolSettings,
     SetMaterialTexture0,
     SetMaterialTexture1,
+    AutoRenameMaterials,
+    MergeFLVERMaterials,
     AddMaterialGXItem,
     RemoveMaterialGXItem,
 
@@ -174,25 +178,26 @@ CLASSES = (
     FLVERDummyPropsPanel,
     FLVERImportPanel,
     FLVERExportPanel,
+    FLVERMaterialSettingsPanel,
     FLVERModelToolsPanel,
     FLVERMaterialToolsPanel,
     # FLVERLightmapsPanel,  # TODO: not quite ready
     FLVERUVMapsPanel,
 
-    OBJECT_UL_flver_gx_item,
+    FLVERGXItemUIList,
     FLVERMaterialPropsPanel,
     # endregion
 
     # region Havok Animation
     GlobalSettingsPanel_AnimationView,
 
-    ImportHKXAnimation,
+    ImportAnyHKXAnimation,
     ImportHKXAnimationWithBinderChoice,
     ImportCharacterHKXAnimation,
     ImportObjectHKXAnimation,
     ImportAssetHKXAnimation,
-    ExportLooseHKXAnimation,
-    ExportHKXAnimationIntoBinder,
+    ExportAnyHKXAnimation,
+    ExportHKXAnimationIntoAnyBinder,
     ExportCharacterHKXAnimation,
     ExportObjectHKXAnimation,
 
@@ -208,16 +213,18 @@ CLASSES = (
     # region Havok Collision
     GlobalSettingsPanel_CollisionView,
 
-    ImportHKXMapCollision,
+    ImportAnyHKXMapCollision,
     ImportHKXMapCollisionWithBinderChoice,
-    ImportSelectedMapHKXMapCollision,
+    ImportMapHKXMapCollision,
 
-    ExportLooseHKXMapCollision,
-    ExportHKXMapCollisionIntoBinder,
-    ExportHKXMapCollisionToMap,
+    ExportAnyHKXMapCollision,
+    ExportHKXMapCollisionIntoAnyBinder,
+    ExportMapHKXMapCollision,
     MapCollisionImportExportPanel,
     MapCollisionToolsPanel,
 
+    RenameCollision,
+    GenerateCollisionFromMesh,
     SelectHiResFaces,
     SelectLoResFaces,
 
@@ -243,12 +250,12 @@ CLASSES = (
     NVMFaceIndex,  # also used by `MCGNodeProps`
     NVMEventEntityProps,
 
-    ImportNVM,
+    ImportAnyNVM,
     ImportNVMWithBinderChoice,
-    ImportSelectedMapNVM,
-    ExportLooseNVM,
-    ExportNVMIntoBinder,
-    ExportNVMIntoSelectedMap,
+    ImportMapNVM,
+    ExportAnyNVM,
+    ExportNVMIntoAnyBinder,
+    ExportMapNVM,
 
     ImportNVMHKT,
     ImportNVMHKTWithBinderChoice,
@@ -261,23 +268,30 @@ CLASSES = (
     NVMNavmeshImportPanel,
     NVMNavmeshExportPanel,
     NVMNavmeshToolsPanel,
-    NavmeshERImportPanel,
+    NVMHKTImportPanel,
+    NVMEventEntityPanel,
+    NVMEventEntityTriangleUIList,
     NavmeshFaceSettings,
+    RenameNavmesh,
     AddNVMFaceFlags,
     RemoveNVMFaceFlags,
+    SetNVMFaceFlags,
     SetNVMFaceObstacleCount,
     ResetNVMFaceInfo,
+    AddNVMEventEntityTriangleIndex,
+    RemoveNVMEventEntityTriangleIndex,
+    GenerateNavmeshFromCollision,
     # endregion
 
     # region Nav Graph (MCG)
     GlobalSettingsPanel_NavGraphView,
 
-    ImportMCG,
-    ImportSelectedMapMCG,
-    ImportMCP,
-    ImportSelectedMapMCP,
-    ExportMCG,
-    ExportMCGMCPToMap,
+    ImportAnyMCG,
+    ImportMapMCG,
+    ImportAnyMCP,
+    ImportMapMCP,
+    ExportAnyMCGMCP,
+    ExportMapMCGMCP,
     MCGDrawSettings,
 
     AddMCGNodeNavmeshATriangleIndex,
@@ -297,12 +311,12 @@ CLASSES = (
     NavGraphComputeSettings,
 
     MCGPropsPanel,
-    OBJECT_UL_nav_triangle,
+    NavTriangleUIList,
     MCGNodePropsPanel,
     MCGEdgePropsPanel,
-    MCGImportExportPanel,
-    MCGDrawPanel,
-    MCGToolsPanel,
+    NavGraphImportExportPanel,
+    NavGraphDrawPanel,
+    NavGraphToolsPanel,
     MCGGeneratorPanel,
     # endregion
 
@@ -311,6 +325,7 @@ CLASSES = (
     ImportMapMSB,
     ImportAnyMSB,
     ExportMapMSB,
+    ExportAnyMSB,
 
     RegionDrawSettings,
 
@@ -318,10 +333,23 @@ CLASSES = (
     DisableAllImportModels,
     EnableSelectedNames,
     DisableSelectedNames,
+    MSBPartCreationTemplates,
     CreateMSBPart,
+    CreateMSBRegion,
+    CreateMSBEnvironmentEvent,
     DuplicateMSBPartModel,
+    BatchSetPartGroups,
+    CopyDrawGroups,
+    ApplyPartTransformToModel,
+    CreateConnectCollision,
+    MSBFindPartsPointer,
+    FindMSBParts,
     FindEntityID,
     ColorMSBEvents,
+    RestoreActivePartInitialTransform,
+    RestoreSelectedPartsInitialTransforms,
+    UpdateActiveMSBPartInitialTransform,
+    UpdateSelectedPartsInitialTransforms,
 
     MSBPartProps,
     MSBMapPieceProps,
@@ -337,7 +365,8 @@ CLASSES = (
     MSBExportSettings,
     MSBToolSettings,
 
-    MSBImportExportPanel,
+    MSBImportPanel,
+    MSBExportPanel,
     MSBToolsPanel,
     MSBPartPanel,
 
@@ -379,22 +408,49 @@ CLASSES = (
     MSBEnvironmentEventProps,
     MSBNPCInvasionEventProps,
     # endregion
+
+    # region Misc. Operators
+    CopyMeshSelectionOperator,
+    CutMeshSelectionOperator,
+    BooleanMeshCut,
+    ApplyLocalMatrixToMesh,
+    ScaleMeshIslands,
+    SelectActiveMeshVerticesNearSelected,
+    ConvexHullOnEachMeshIsland,
+    SetActiveFaceNormalUpward,
+    SpawnObjectIntoMeshAtFaces,
+    WeightVerticesWithFalloff,
+    ApplyModifierNonSingleUser,
+    PrintGameTransform,
+
+    ShowCollectionOperator,
+    HideCollectionOperator,
+
+    GlobalSettingsPanel_MiscView,
+    MiscSoulstructMeshOperatorsPanel,
+    MiscSoulstructCollectionOperatorsPanel,
+    MiscSoulstructOtherOperatorsPanel,
+    # endregion
+
+    # region Utility Operators
+    ViewSelectedAtDistanceZero,
+    # endregion
 )
 
 
 # noinspection PyUnusedLocal
 def havok_menu_func_import(self, context):
-    self.layout.operator(ImportHKXMapCollision.bl_idname, text="HKX Collision (.hkx/.hkxbhd)")
-    self.layout.operator(ImportHKXAnimation.bl_idname, text="HKX Animation (.hkx/.hkxbhd)")
+    self.layout.operator(ImportAnyHKXMapCollision.bl_idname, text="HKX Collision (.hkx/.hkxbhd)")
+    self.layout.operator(ImportAnyHKXAnimation.bl_idname, text="HKX Animation (.hkx/.hkxbhd)")
     # self.layout.operator(ImportHKXCutscene.bl_idname, text="HKX Cutscene (.remobnd)")
 
 
 # noinspection PyUnusedLocal
 def havok_menu_func_export(self, context):
-    self.layout.operator(ExportLooseHKXMapCollision.bl_idname, text="HKX Collision (.hkx)")
-    self.layout.operator(ExportHKXMapCollisionIntoBinder.bl_idname, text="HKX Collision to Binder (.hkxbhd)")
-    self.layout.operator(ExportLooseHKXAnimation.bl_idname, text="HKX Animation (.hkx)")
-    self.layout.operator(ExportHKXAnimationIntoBinder.bl_idname, text="HKX Animation to Binder (.hkxbhd)")
+    self.layout.operator(ExportAnyHKXMapCollision.bl_idname, text="HKX Collision (.hkx)")
+    self.layout.operator(ExportHKXMapCollisionIntoAnyBinder.bl_idname, text="HKX Collision to Binder (.hkxbhd)")
+    self.layout.operator(ExportAnyHKXAnimation.bl_idname, text="HKX Animation (.hkx)")
+    self.layout.operator(ExportHKXAnimationIntoAnyBinder.bl_idname, text="HKX Animation to Binder (.hkxbhd)")
     # self.layout.operator(ExportHKXCutscene.bl_idname, text="HKX Cutscene (.remobnd)")
 
 
@@ -405,8 +461,8 @@ SCENE_POINTERS = dict(
     texture_export_settings=TextureExportSettings,
     bake_lightmap_settings=BakeLightmapSettings,
     flver_tool_settings=FLVERToolSettings,
+    flver_material_settings=FLVERMaterialSettings,
     material_tool_settings=MaterialToolSettings,
-    mesh_move_settings=MeshMoveSettings,
     map_collision_import_settings=MapCollisionImportSettings,
     map_collision_tool_settings=MapCollisionToolSettings,
     navmesh_face_settings=NavmeshFaceSettings,
@@ -415,6 +471,8 @@ SCENE_POINTERS = dict(
     mcg_draw_settings=MCGDrawSettings,
     msb_import_settings=MSBImportSettings,
     msb_export_settings=MSBExportSettings,
+    msb_part_creation_templates=MSBPartCreationTemplates,
+    find_msb_parts_pointer=MSBFindPartsPointer,
     msb_tool_settings=MSBToolSettings,
     region_draw_settings=RegionDrawSettings,
     animation_import_settings=AnimationImportSettings,
@@ -429,8 +487,9 @@ OBJECT_POINTERS = dict(
     FLVER=FLVERProps,
     FLVER_DUMMY=FLVERDummyProps,
 
-    COLLISION=MapCollisionProps,
+    COLLISION=MapCollisionProps,  # currently empty
 
+    NVM=NVMProps,  # currently empty
     NVM_EVENT_ENTITY=NVMEventEntityProps,
     MCG=MCGProps,
     MCG_NODE=MCGNodeProps,
@@ -483,17 +542,13 @@ EDIT_BONE_POINTERS = dict(
 
 SCENE_ATTRIBUTES = []
 OBJECT_ATTRIBUTES = []
+COLLECTION_ATTRIBUTES = []
 MATERIAL_ATTRIBUTES = []
 IMAGE_ATTRIBUTES = []
 EDIT_BONE_ATTRIBUTES = []
 
 LOAD_POST_HANDLERS = []
 SPACE_VIEW_3D_HANDLERS = []
-
-
-@bpy.app.handlers.persistent
-def load_handler(_):
-    SoulstructSettings.from_context().load_settings()
 
 
 def register():
@@ -535,9 +590,21 @@ def register():
             (SoulstructType.MSB_PART, "MSB Part", "MSB part object"),  # NOT a FLVER data-block owner
             (SoulstructType.MSB_REGION, "MSB Region", "MSB region object"),
             (SoulstructType.MSB_EVENT, "MSB Event", "MSB event object"),
+            (SoulstructType.MSB_MODEL_PLACEHOLDER, "MSB Model (Placeholder)", "MSB model placeholder object"),
         ]
     )
     OBJECT_ATTRIBUTES.append("soulstruct_type")
+
+    bpy.types.Collection.soulstruct_type = bpy.props.EnumProperty(
+        name="Soulstruct Collection Type",
+        description="Type of Soulstruct collection that this Blender Collection represents (INTERNAL)",
+        items=[
+            (SoulstructCollectionType.NONE, "None", "Not a Soulstruct typed collection"),
+
+            (SoulstructCollectionType.MSB, "MSB", "MSB collection"),
+        ]
+    )
+    COLLECTION_ATTRIBUTES.append("soulstruct_type")
 
     for prop_name, prop_type in OBJECT_POINTERS.items():
         setattr(bpy.types.Object, prop_name, bpy.props.PointerProperty(type=prop_type))
@@ -555,18 +622,15 @@ def register():
         setattr(bpy.types.EditBone, prop_name, bpy.props.PointerProperty(type=prop_type))
         EDIT_BONE_ATTRIBUTES.append(prop_name)
 
-    bpy.app.handlers.load_post.append(load_handler)
-    LOAD_POST_HANDLERS.append(load_handler)
-
     SPACE_VIEW_3D_HANDLERS.append(
         bpy.types.SpaceView3D.draw_handler_add(draw_dummy_ids, (), "WINDOW", "POST_PIXEL")
     )
 
     SPACE_VIEW_3D_HANDLERS.append(
-        bpy.types.SpaceView3D.draw_handler_add(draw_mcg_nodes, (), "WINDOW", "POST_VIEW")
+        bpy.types.SpaceView3D.draw_handler_add(update_mcg_draw_caches, (), "WINDOW", "POST_VIEW")
     )
     SPACE_VIEW_3D_HANDLERS.append(
-        bpy.types.SpaceView3D.draw_handler_add(draw_mcg_node_labels, (), "WINDOW", "POST_PIXEL")
+        bpy.types.SpaceView3D.draw_handler_add(draw_mcg_nodes, (), "WINDOW", "POST_VIEW")
     )
     SPACE_VIEW_3D_HANDLERS.append(
         bpy.types.SpaceView3D.draw_handler_add(draw_mcg_edges, (), "WINDOW", "POST_VIEW")
@@ -599,6 +663,10 @@ def unregister():
     for prop_name in OBJECT_ATTRIBUTES:
         delattr(bpy.types.Object, prop_name)
     OBJECT_ATTRIBUTES.clear()
+
+    for prop_name in COLLECTION_ATTRIBUTES:
+        delattr(bpy.types.Collection, prop_name)
+    COLLECTION_ATTRIBUTES.clear()
 
     for prop_name in MATERIAL_ATTRIBUTES:
         delattr(bpy.types.Material, prop_name)

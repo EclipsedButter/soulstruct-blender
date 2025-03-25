@@ -12,14 +12,21 @@ import bpy
 
 from soulstruct.base.models.mtd import MTDBND
 from soulstruct.darksouls1r.models.shaders import MatDef as DS1R_MatDef
+from soulstruct.games import DARK_SOULS_DSR
 
+from io_soulstruct.bpy_base.property_group import SoulstructPropertyGroup
 from io_soulstruct.exceptions import SoulstructTypeError
 from io_soulstruct.flver.material.types import BlenderFLVERMaterial
 from io_soulstruct.flver.models.types import BlenderFLVER
-from io_soulstruct.utilities.operators import LoggingOperator
+from io_soulstruct.utilities import LoggingOperator
 
 
-class BakeLightmapSettings(bpy.types.PropertyGroup):
+class BakeLightmapSettings(SoulstructPropertyGroup):
+
+    # Currently only for DSR.
+    GAME_PROP_NAMES = {
+        DARK_SOULS_DSR: (),  # all properties are supported
+    }
 
     uv_layer_name: bpy.props.StringProperty(
         name="UV Layer Name",
@@ -82,10 +89,10 @@ class BakeLightmapTextures(LoggingOperator):
     bl_description = "Bake rendered lightmap image textures from all materials of all selected FLVERs"
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         """FLVER meshes must be selected."""
         try:
-            bl_flvers = BlenderFLVER.from_selected_objects(context)
+            BlenderFLVER.from_selected_objects(context)
         except SoulstructTypeError:
             return False
         return True
@@ -103,11 +110,11 @@ class BakeLightmapTextures(LoggingOperator):
         """
         self.info("Baking FLVER lightmap textures...")
 
-        settings = self.settings(context)
-        mtdbnd = settings.get_mtdbnd(self)
+        mat_settings = context.scene.flver_material_settings
+        mtdbnd = mat_settings.get_mtdbnd(self, context)
         bake_settings = context.scene.bake_lightmap_settings
 
-        bl_flvers = BlenderFLVER.from_selected_objects(context)  # type: list[BlenderFLVER]
+        bl_flvers = BlenderFLVER.from_selected_objects(context, sort=True)  # type: list[BlenderFLVER]
 
         # Set up variables/function to restore original state after bake.
         original_lightmap_strengths = []  # pairs of `(node, value)`

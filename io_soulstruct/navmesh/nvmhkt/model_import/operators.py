@@ -293,7 +293,7 @@ class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
     )
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         if not cls.settings(context).is_game("ELDEN_RING"):
             return False
         settings = cls.settings(context)
@@ -301,6 +301,7 @@ class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
             settings.get_import_map_file_path(f"{settings.map_stem}.nvmhktbnd")
         except FileNotFoundError:
             return False
+        return True
 
     @classmethod
     def get_binder(cls, context) -> Binder | None:
@@ -320,8 +321,8 @@ class ImportNVMHKTFromNVMHKTBND(BinderEntrySelectOperator):
         model_name = entry.minimal_stem
         nvmhkt = entry.to_binary_file(NavmeshHKX)
 
-        collection = get_or_create_collection(
-            context.scene.collection, f"{map_stem} Models", f"{map_stem} Navmesh Models"
+        collection = find_or_create_collection(
+            context.scene.collection, "Models", f"{map_stem} Models", f"{map_stem} Navmesh Models"
         )
         importer = NVMHKTImporter(self, context, collection=collection)
 
@@ -403,7 +404,7 @@ class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
     # TODO: Need dictionary built from 'WorldMapLegacy
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         if not cls.settings(context).is_game("ELDEN_RING"):
             return False
         settings = cls.settings(context)
@@ -422,13 +423,14 @@ class ImportAllNVMHKTsFromNVMHKTBND(ImportAllNVMHKTBase):
             return self.error("NVMHKT import from game NVMHKTBND is only available for Elden Ring.")
 
         map_stem = settings.map_stem
-        nvmhktbnd_path = settings.get_import_map_file_path(f"{map_stem}.nvmhktbnd.dcx")
-        if not nvmhktbnd_path:
+        try:
+            nvmhktbnd_path = settings.get_import_map_file_path(f"{map_stem}.nvmhktbnd.dcx")
+        except FileNotFoundError:
             return self.error(f"Could not find NVMHKTBND file for map '{map_stem}'.")
         small_tile_match = re.match(r"(m60|m61)_(\d\d)_(\d\d)_(\d)0", map_stem)
 
-        collection = get_or_create_collection(
-            context.scene.collection, f"{map_stem} Models", f"{map_stem} Navmesh Models"
+        collection = find_or_create_collection(
+            context.scene.collection, "Models", f"{map_stem} Models", f"{map_stem} Navmesh Models"
         )
 
         if small_tile_match:
@@ -605,7 +607,7 @@ class ImportAllOverworldNVMHKTsBase(ImportAllNVMHKTBase):
     small_tile_width = 256.0
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         if not cls.settings(context).is_game("ELDEN_RING"):
             return False
         return True
@@ -625,8 +627,8 @@ class ImportAllOverworldNVMHKTsBase(ImportAllNVMHKTBase):
         map_count = 0
         model_count = 0
 
-        collection = get_or_create_collection(
-            context.scene.collection, f"{self.AREA} Models", f"{self.AREA} Navmesh Models"
+        collection = find_or_create_collection(
+            context.scene.collection, "Models", f"{self.AREA} Models", f"{self.AREA} Navmesh Models"
         )
 
         for nvmhktbnd_path in overworld_map_dir.rglob(f"{self.AREA}_??_??_00.nvmhktbnd.dcx"):

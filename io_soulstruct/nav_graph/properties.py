@@ -11,9 +11,12 @@ __all__ = [
 import bpy
 
 from io_soulstruct.navmesh.nvm.properties import NVMFaceIndex
+from io_soulstruct.bpy_base.property_group import SoulstructPropertyGroup
 
 
-class MCGProps(bpy.types.PropertyGroup):
+class MCGProps(SoulstructPropertyGroup):
+
+    # No game-specific properties.
 
     unknown_0: bpy.props.IntProperty(
         name="Unknown 0",
@@ -34,7 +37,9 @@ class MCGProps(bpy.types.PropertyGroup):
     )
 
 
-class MCGNodeProps(bpy.types.PropertyGroup):
+class MCGNodeProps(SoulstructPropertyGroup):
+
+    # No game-specific properties.
 
     unknown_offset: bpy.props.IntProperty(
         name="Unknown Offset",
@@ -79,7 +84,9 @@ class MCGNodeProps(bpy.types.PropertyGroup):
     )
 
 
-class MCGEdgeProps(bpy.types.PropertyGroup):
+class MCGEdgeProps(SoulstructPropertyGroup):
+
+    # No game-specific properties.
 
     navmesh_part: bpy.props.PointerProperty(
         name="Navmesh Part",
@@ -107,7 +114,9 @@ class MCGEdgeProps(bpy.types.PropertyGroup):
     )
 
 
-class NavGraphComputeSettings(bpy.types.PropertyGroup):
+class NavGraphComputeSettings(SoulstructPropertyGroup):
+
+    # No game-specific properties.
 
     select_path: bpy.props.BoolProperty(
         name="Select Path",
@@ -124,4 +133,9 @@ class NavGraphComputeSettings(bpy.types.PropertyGroup):
         name="Obstacle Cost Multiplier",
         default=1.0,
         description="Cost multiplier (of distance) for Obstacle faces. Ignores obstacle count",
+    )
+    connected_exit_vertex_distance: bpy.props.FloatProperty(
+        name="Connected Exit Vertex Distance",
+        default=0.01,
+        description="Maximum distance for connected 'Exit' face vertices during node creation",
     )

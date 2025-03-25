@@ -10,11 +10,14 @@ from pathlib import Path
 import bpy
 
 from soulstruct.base.models.flver import *
+from soulstruct.games import DARK_SOULS_DSR
 
 from io_soulstruct.exceptions import MaterialImportError, FLVERExportError
-from io_soulstruct.utilities import LoggingOperator, get_bl_custom_prop
+from io_soulstruct.types.utilities import add_auto_type_props
+from io_soulstruct.utilities import LoggingOperator, get_bl_custom_prop, remove_dupe_suffix
 from io_soulstruct.flver.image import DDSTexture, DDSTextureCollection
-from .shaders import NodeTreeBuilder
+from io_soulstruct.flver.image.utilities import find_or_create_image
+from .shaders import NodeTreeBuilder, NodeTreeBuilder_DS1R
 
 if tp.TYPE_CHECKING:
     from soulstruct.base.models.shaders import MatDef
@@ -42,9 +45,9 @@ class BlenderFLVERMaterial:
         self.material.name = value
 
     @property
-    def tight_name(self):
-        """Removes everything after first '[' bracket and strips spaces."""
-        return self.material.name.split("[")[0].rstrip()
+    def game_name(self) -> str:
+        """Removes everything after first '[' bracket and/or first '<' bracket, and strips spaces."""
+        return remove_dupe_suffix(self.material.name).split("[")[0].split("<")[0].strip()
 
     @property
     def node_tree(self):
@@ -121,7 +124,8 @@ class BlenderFLVERMaterial:
         """Create a new Blender material from a FLVER material.
 
         Will use material texture stems to search for images of all supported formats in the Blender image data. If no
-        image is found, the texture will be left unassigned in the material.
+        image is found (and the texture is not empty), a placeholder 1x1 magenta image will be created (we need the
+        Image name to write to `FLVER`). This placeholder image can be replaced later with another operator if desired.
 
         Attempts to build a Blender node tree for the material. The only critical information stored in the node tree is
         the sampler names (node labels) and image names (image node `Image` names) of the `ShaderNodeTexImage` nodes
@@ -214,8 +218,12 @@ class BlenderFLVERMaterial:
 
         if not copied:
             # Try to build shader nodetree.
+            if context.scene.soulstruct_settings.is_game(DARK_SOULS_DSR):
+                builder_class = NodeTreeBuilder_DS1R
+            else:
+                builder_class = NodeTreeBuilder
             try:
-                builder = NodeTreeBuilder(
+                builder = builder_class(
                     operator=operator,
                     context=context,
                     material=bl_material,
@@ -248,27 +256,13 @@ class BlenderFLVERMaterial:
                         tex_nodes_by_name[sampler_name].image = None
                         continue
 
-                    # TODO: NodeTreeBuilder has identical method.
-                    # Search for Blender image with no extension, TGA, PNG, or DDS, in that order of preference.
-                    for image_name in (
-                        f"{texture_stem}", f"{texture_stem}.tga", f"{texture_stem}.png", f"{texture_stem}.dds"
-                    ):
-                        try:
-                            bl_image = bpy.data.images[image_name]
-                            break
-                        except KeyError:
-                            pass
-                    else:
-                        # Blender image not found. Create empty 1x1 Blender image.
-                        bl_image = bpy.data.images.new(name=texture_stem, width=1, height=1, alpha=True)
-                        bl_image.pixels = [1.0, 0.0, 1.0, 1.0]  # magenta
-                        if context.scene.flver_import_settings.import_textures:  # otherwise, expected to be missing
-                            operator.warning(
-                                f"Could not find texture '{texture_stem}' in Blender image data. "
-                                f"Created 1x1 magenta Image."
-                            )
-
+                    bl_image = find_or_create_image(operator, context, texture_stem)
                     tex_nodes_by_name[sampler_name].image = bl_image
+
+                    # Update Image colorspace from node label. (If image is used with multiple sampler types, this will
+                    # be the last one found.) TODO: Would be better to do this upon `Image` creation, based on name.
+                    if "Albedo" not in tex_nodes_by_name[sampler_name].label:
+                        bl_image.colorspace_settings.name = "Non-Color"
 
         return material
 
@@ -278,7 +272,7 @@ class BlenderFLVERMaterial:
         context: bpy.types.Context,
         matdef: MatDef,
         texture_collection: DDSTextureCollection = None,
-        path_prefix="",
+        get_texture_path_prefix: tp.Callable[[str], str] | None = None,
     ) -> Material:
         """Create a FLVER material from Blender material custom properties and texture nodes.
 
@@ -319,7 +313,7 @@ class BlenderFLVERMaterial:
         """
         if texture_collection is None:
             texture_collection = DDSTextureCollection()
-        name = self.tight_name
+        name = self.game_name
 
         export_settings = context.scene.flver_export_settings
 
@@ -396,6 +390,11 @@ class BlenderFLVERMaterial:
                         f"enable 'Allow Missing Textures' in FLVER export options."
                     )
 
+            if get_texture_path_prefix:
+                path_prefix = get_texture_path_prefix(texture_stem)
+            else:
+                path_prefix = ""
+
             texture_path = (path_prefix + texture_stem + path_ext) if texture_stem else ""
             # TODO: Unknowns currently all ignored.
             texture = Texture(path=texture_path, texture_type=sampler_name)
@@ -430,20 +429,20 @@ class BlenderFLVERMaterial:
         context: bpy.types.Context,
         create_lod_face_sets: bool,
         matdef: MatDef,
-        use_chr_layout: bool,
+        use_map_piece_layout: bool,
         texture_collection: DDSTextureCollection = None,
-        texture_path_prefix="",
+        get_texture_path_prefix: tp.Callable[[str], str] | None = None,
     ) -> SplitMeshDef:
         """Use given `matdef` to create a `SplitMeshDef` for the given Blender material with either a character
         layout or a map piece layout, depending on `use_chr_layout`."""
 
         # Some Blender materials may be variants representing distinct Mesh/FaceSet properties; these will be
         # mapped to the same FLVER `Material`/`VertexArrayLayout` combo (created here).
-        flver_material = self.to_flver_material(operator, context, matdef, texture_collection, texture_path_prefix)
-        if use_chr_layout:
-            array_layout = matdef.get_character_layout()
-        else:
+        flver_material = self.to_flver_material(operator, context, matdef, texture_collection, get_texture_path_prefix)
+        if use_map_piece_layout:
             array_layout = matdef.get_map_piece_layout()
+        else:
+            array_layout = matdef.get_non_map_piece_layout()
 
         # We only respect 'Face Set Count' if requested in export options. (Duplicating the main face set is only
         # viable in older games with low-res meshes, but those same games don't even really need LODs anyway.)
@@ -458,7 +457,7 @@ class BlenderFLVERMaterial:
         }
 
         used_uv_layer_names = [layer.name for layer in matdef.get_used_uv_layers()]
-        operator.info(f"Created FLVER material '{flver_material.name}' with UV layers: {used_uv_layer_names}")
+        operator.debug(f"Created FLVER material '{flver_material.name}' with UV layers: {used_uv_layer_names}")
 
         return SplitMeshDef(
             flver_material,
@@ -475,15 +474,30 @@ class BlenderFLVERMaterial:
             if node.type == "TEX_IMAGE" and (not with_image_only or node.image is not None)
         ]
 
-    @classmethod
-    def add_auto_type_props(cls, *names):
-        for prop_name in names:
-            setattr(
-                cls, prop_name, property(
-                    lambda self, pn=prop_name: getattr(self.type_properties, pn),
-                    lambda self, value, pn=prop_name: setattr(self.type_properties, pn, value),
-                )
-            )
+    def get_texture_name_dict(self) -> dict[str, str]:
+        """Get a dictionary mapping texture node names (game-specific samplers) to the textures they use.
+
+        If no Image is set to a node, the value will be an empty string.
+        """
+        return {
+            node.name: node.image.name if node.image else ""
+            for node in self.get_image_texture_nodes(with_image_only=False)
+        }
+
+    def get_hash(self, include_face_set_count=True, is_flver0=False) :
+        """Hash based on all FLVER material properties, with `face_set_count` optional (used by default)."""
+        hashed = [self.is_bind_pose, self.mat_def_path, self.default_bone_index]  # type: list[bool | str | int | tuple]
+        if not is_flver0:
+            hashed.extend([self.flags, self.f2_unk_x18])
+        if include_face_set_count:
+            hashed.append(self.face_set_count)
+
+        texture_name_dict = self.get_texture_name_dict()
+        for sampler_name in sorted(texture_name_dict.keys()):
+            texture_name = self.sampler_prefix + texture_name_dict[sampler_name]
+            hashed.append((sampler_name, texture_name))
+
+        return hash(tuple(hashed))
 
 
-BlenderFLVERMaterial.add_auto_type_props(*BlenderFLVERMaterial.AUTO_MATERIAL_PROPS)
+add_auto_type_props(BlenderFLVERMaterial, *BlenderFLVERMaterial.AUTO_MATERIAL_PROPS)

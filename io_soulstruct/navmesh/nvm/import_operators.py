@@ -11,9 +11,9 @@ This file format is only used in DeS and DS1 (PTDE/DSR).
 from __future__ import annotations
 
 __all__ = [
-    "ImportNVM",
+    "ImportAnyNVM",
     "ImportNVMWithBinderChoice",
-    "ImportSelectedMapNVM",
+    "ImportMapNVM",
 ]
 
 import traceback
@@ -104,7 +104,7 @@ class BaseImportNVM(LoggingImportOperator):
         return entry_model_id == self.navmesh_model_id
 
 
-class ImportNVM(BaseImportNVM):
+class ImportAnyNVM(BaseImportNVM):
     bl_idname = "import_scene.nvm"
     bl_label = "Import NVM"
     bl_description = "Import a NVM navmesh file. Can import from BNDs and supports DCX-compressed files"
@@ -285,7 +285,7 @@ class ImportNVMWithBinderChoice(LoggingOperator):
         bpy.ops.wm.nvm_binder_choice_operator("INVOKE_DEFAULT")
 
 
-class ImportSelectedMapNVM(BinderEntrySelectOperator):
+class ImportMapNVM(BinderEntrySelectOperator):
     """Import a NVM from the current selected value of listed game map NVMs."""
     bl_idname = "import_scene.selected_map_nvm"
     bl_label = "Import NVM"
@@ -306,7 +306,7 @@ class ImportSelectedMapNVM(BinderEntrySelectOperator):
     )
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context) -> bool:
         settings = cls.settings(context)
         if not settings.game_config.supports_nvm:
             return False
@@ -337,8 +337,9 @@ class ImportSelectedMapNVM(BinderEntrySelectOperator):
         nvm = entry.to_binary_file(NVM)
         model_name = entry.minimal_stem
 
-        collection = get_or_create_collection(
+        collection = find_or_create_collection(
             context.scene.collection,
+            "Models",
             f"{map_stem} Models",
             f"{map_stem} Navmesh Models",
         )
