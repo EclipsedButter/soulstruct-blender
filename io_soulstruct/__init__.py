@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib
 import sys
+import subprocess
+from importlib.metadata import distributions
 from pathlib import Path
 
 import bpy
@@ -23,6 +25,12 @@ addon_modules_path_scipy = str((Path(__file__).parent / "../io_soulstruct_lib_31
 if addon_modules_path_scipy not in sys.path:
     sys.path.append(addon_modules_path_scipy)
 
+def have_command(command: str):
+    return subprocess.run(
+        ["type", f"{command}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).returncode
 
 def try_reload(_module_name: str):
     try:
@@ -30,6 +38,9 @@ def try_reload(_module_name: str):
     except (KeyError, ImportError):
         pass
 
+wine = have_command("wine")
+zugbruecke = any("zugbruecke" in p.name for p in distributions())
+wenv = any("wenv" in p.name for p in distributions())
 
 # Reload all Soulstruct modules, then all modules in this add-on (except this script).
 # NOTE: This is IMPORTANT when using 'Reload Scripts' in Blender, as it is otherwise prone to partial re-imports of
