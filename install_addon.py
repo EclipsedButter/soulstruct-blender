@@ -1,22 +1,24 @@
-"""Install all scripts into Blender, along with Soulstruct.
-
-The Blender script (`io_flver.py`) will ensure that the mini-Soulstruct module is added to the Blender path. Note that
-you will have to restart Blender to see any changes to this mini-module, as `Reload Scripts` in Blender will not
-re-import it.
-"""
+"""Install all scripts into Blender, along with `soulstruct`, `soulstruct-havok`, and required third-party modules."""
+import logging
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
-from soulstruct.utilities.files import PACKAGE_PATH
+from soulstruct.logging_utils import setup
+from soulstruct.utilities.files import SOULSTRUCT_PATH
+from soulstruct.havok.utilities.files import SOULSTRUCT_HAVOK_PATH
 
-from soulstruct_havok.utilities.files import HAVOK_PACKAGE_PATH
+setup(console_level="INFO")
+_LOGGER = logging.getLogger("soulstruct.blender.install_addon")
+
+_ALWAYS_IGNORE = [
+    "__pycache__", "*.pyc", ".git", ".idea", "*.egg-info", "tests",
+    "soulstruct_config.json", "soulstruct.log",
+]
 
 
-PY_SITE_PACKAGES = Path(sys.executable).parent / "../Lib/site-packages"
-
-
-def copy_addon(addons_dir: str | Path, copy_soulstruct_module=True, copy_third_party_modules=True, clear_settings=True):
+def install_addon(addons_dir: str | Path, install_soulstruct=True, editable_soulstruct=False):
     """Copy `io_soulstruct` and (by default) `io_soulstruct_lib` into given `addons_dir` parent directory."""
 
     addons_dir = Path(addons_dir)
@@ -26,118 +28,99 @@ def copy_addon(addons_dir: str | Path, copy_soulstruct_module=True, copy_third_p
 
     dest_io_soulstruct_dir = addons_dir / "io_soulstruct"
     dest_io_soulstruct_lib_dir = addons_dir / "io_soulstruct_lib"
+    dest_modules_dir = addons_dir / "modules"
 
-    ignore_pycache = shutil.ignore_patterns("__pycache__", "*.pyc", "__address_cache__")
+    ignore_patterns = shutil.ignore_patterns(*_ALWAYS_IGNORE)
 
-    # Install actual Blender scripts, preserving existing 'SoulstructSettings.json' only.
-    settings_path = dest_io_soulstruct_dir / "SoulstructSettings.json"
-    settings_data = settings_path.read_bytes() if not clear_settings and settings_path.is_file() else b""
+    # Install actual Blender scripts.
     if dest_io_soulstruct_dir.is_dir():
         shutil.rmtree(dest_io_soulstruct_dir, ignore_errors=False)
     shutil.copytree(
         src_io_soulstruct_dir,
         dest_io_soulstruct_dir,
-        ignore=shutil.ignore_patterns(
-            "__pycache__", "*.pyc", "__address_cache__", "soulstruct_config.json", "soulstruct.log"
-        ),
+        ignore=ignore_patterns,
     )
-    if settings_data:
-        settings_path.write_bytes(settings_data)
-    print(f"# Blender addon `io_soulstruct` installed to '{addons_dir}'.")
+    _LOGGER.info(f"Blender addon `io_soulstruct` installed to '{addons_dir}'.")
 
-    if copy_soulstruct_module:
-        # Full Soulstruct install, now that Blender 3.3 supports Python 3.10.
-        print("# Copying Soulstruct module...")
-        shutil.rmtree(dest_io_soulstruct_lib_dir / "soulstruct", ignore_errors=True)
-        # Removal may not be complete if Blender is open, particularly as `soulstruct.log` may not be deleted.
+    if not install_soulstruct:
+        return  # done, just installing Blender scripts
+
+    # Full Soulstruct install.
+
+    # Two modes: an editable install pointing to THIS environment's `soulstruct` and `soulstruct-havok` modules, or
+    # copying the modules from the package into `io_soulstruct_lib` and performing an editable install from there.
+    # (The latter is what the add-on will attempt to do itself if it detects that the modules are not installed.)
+
+    soulstruct_root_path = SOULSTRUCT_PATH("../..")  # step out of `src/soulstruct`
+    havok_root_path = SOULSTRUCT_HAVOK_PATH("../..")  # step out of `src/soulstruct` (in `soulstruct-havok`)
+
+    if editable_soulstruct:
+        # Get the current environment's `soulstruct` and `soulstruct-havok` module paths.
+        _LOGGER.info("Installing Soulstruct modules in editable mode...")
+        soulstruct_install_path = soulstruct_root_path
+        havok_install_path = havok_root_path
+    else:
+        _LOGGER.info("Copying Soulstruct modules to `io_soulstruct_lib`...")
+        soulstruct_install_path = dest_io_soulstruct_lib_dir / "soulstruct"
+        shutil.rmtree(soulstruct_install_path, ignore_errors=True)
+        _LOGGER.info("Copying Soulstruct module...")
         shutil.copytree(
-            PACKAGE_PATH(),
-            dest_io_soulstruct_lib_dir / "soulstruct",
+            soulstruct_root_path,
+            soulstruct_install_path,
+            # NOTE: this is the container of `src`, not the package itself
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("*.pyc", "__pycache__", "oo2core_6_win64.dll"),
+            ignore=shutil.ignore_patterns(*_ALWAYS_IGNORE, "oo2core_6_win64.dll"),  # handled manually
         )
 
         # Copy over `oo2core_6_win64.dll` if it exists and isn't already in destination folder.
-        oo2core_dll = PACKAGE_PATH("oo2core_6_win64.dll")
-        if oo2core_dll.is_file() and not (dest_io_soulstruct_lib_dir / "soulstruct/oo2core_6_win64.dll").is_file():
-            shutil.copy(oo2core_dll, dest_io_soulstruct_lib_dir / "soulstruct")
+        # (It may already be in use by Blender.)
+        oo2core_dll = SOULSTRUCT_PATH("oo2core_6_win64.dll")
+        if oo2core_dll.is_file() and not (
+            soulstruct_install_path / "src/soulstruct/oo2core_6_win64.dll").is_file():
+            shutil.copy(oo2core_dll, dest_io_soulstruct_lib_dir / "soulstruct/src/soulstruct")
 
-        if HAVOK_PACKAGE_PATH is not None:
-            print("# Copying Soulstruct-Havok module...")
-            shutil.rmtree(dest_io_soulstruct_lib_dir / "soulstruct_havok", ignore_errors=True)
-            # Removal may not be complete if Blender is open, particularly as `soulstruct.log` may not be deleted.
-            shutil.copytree(
-                HAVOK_PACKAGE_PATH(),
-                dest_io_soulstruct_lib_dir / "soulstruct_havok",
-                ignore=ignore_pycache,
-                dirs_exist_ok=True,
-            )
-
-    if copy_third_party_modules:
-        # NOTE: Blender already comes with `numpy`.
-        copy_site_package("colorama", dest_io_soulstruct_lib_dir / "colorama")
-        copy_site_package("constrata", dest_io_soulstruct_lib_dir / "constrata")
-        copy_site_package("scipy", dest_io_soulstruct_lib_dir / "scipy")
-        copy_site_package("scipy.libs", dest_io_soulstruct_lib_dir / "scipy.libs")
-
-
-def install(blender_addons_dir: str | Path, update_soulstruct_module=False, update_third_party_modules=False):
-    """Install add-on to a real Blender scripts directory, with optional updating of bundled libraries.
-
-    `blender_scripts_dir` should be the `scripts` folder in a specific version of Blender inside your AppData.
-
-    For example:
-        `install(Path("~/AppData/Roaming/Blender/4.2/scripts").expanduser())`
-    """
-    blender_addons_dir = Path(blender_addons_dir)
-    if blender_addons_dir.name != "addons":
-        raise ValueError(
-            f"Expected Blender install directory to be called 'addons'. Given path: {blender_addons_dir}"
-        )
-    if blender_addons_dir.parent.name != "scripts":
-        raise ValueError(
-            f"Expected Blender install directory to be inside parent 'scripts'. Given path: {blender_addons_dir}"
+        _LOGGER.info("Copying Soulstruct-Havok module...")
+        havok_install_path = dest_io_soulstruct_lib_dir / "soulstruct-havok"
+        shutil.rmtree(havok_install_path, ignore_errors=True)
+        # Removal may not be complete if Blender is open, particularly as `soulstruct.log` may not be deleted.
+        shutil.copytree(
+            havok_root_path,
+            havok_install_path,
+            ignore=ignore_patterns,
+            dirs_exist_ok=True,
         )
 
-    blender_addons_dir.mkdir(exist_ok=True, parents=True)
-
-    copy_addon(blender_addons_dir, update_soulstruct_module, update_third_party_modules, clear_settings=False)
-
-
-def copy_site_package(dir_name: str, destination_dir: Path):
-    """Blender 4.1 onwards requires Python 3.11 versions."""
-    if not PY_SITE_PACKAGES.is_dir():
-        raise FileNotFoundError(f"Could not find site-packages directory: {PY_SITE_PACKAGES}.")
-    package_dir = PY_SITE_PACKAGES / dir_name
-    if not package_dir.is_dir():
-        raise FileNotFoundError(f"Could not find site-package directory: {package_dir}.")
-    print(f"# Copying site-package '{dir_name}'...")
-    shutil.copytree(
-        package_dir,
-        destination_dir,
-        ignore=shutil.ignore_patterns("*.pyc", "__pycache__"),
-        dirs_exist_ok=True,
-    )
+    try:
+        subprocess.run(
+            [
+                sys.executable, "-m", "pip", "install",
+                "-e", str(soulstruct_install_path),
+                "-e", str(havok_install_path),
+                "--target", str(dest_modules_dir),
+            ],
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+    except subprocess.CalledProcessError as ex:
+        _LOGGER.error(
+            f"Failed to install Soulstruct modules in editable mode. "
+            f"Ensure that `pip` is installed and available in your Python environment.\n"
+            f"Error: {ex}"
+        )
 
 
 def main(args):
     match args:
-        case [release_directory, "--release"]:
-            # This is just a copy, not a local Blender install.
-            copy_addon(release_directory, copy_soulstruct_module=True, copy_third_party_modules=True)
-        case [addons_directory, "--updateSoulstruct", "--updateThirdParty"]:
-            install(addons_directory, update_soulstruct_module=True, update_third_party_modules=True)
-        case [addons_directory, "--updateSoulstruct"]:
-            install(addons_directory, update_soulstruct_module=True)
-        case [addons_directory, "--updateThirdParty"]:
-            install(addons_directory, update_third_party_modules=True)
+        case [addons_directory, "--installSoulstruct", "-e"]:
+            install_addon(addons_directory, install_soulstruct=True, editable_soulstruct=True)
+        case [addons_directory, "--installSoulstruct"]:
+            install_addon(addons_directory, install_soulstruct=True, editable_soulstruct=False)
         case [addons_directory]:
-            install(addons_directory, update_soulstruct_module=False)
+            install_addon(addons_directory, install_soulstruct=False, editable_soulstruct=False)
         case _:
-            print(
+            _LOGGER.error(
                 f"INVALID ARGUMENTS: {sys.argv}\n"
-                f"Usage: `python install_addon.py [addons_directory] "
-                f"[--release] [--updateSoulstruct] [--updateThirdParty]`"
+                f"Usage: `python install_addon.py [addons_directory] [--installSoulstruct] [-e]`"
             )
 
 

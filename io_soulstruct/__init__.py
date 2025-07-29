@@ -2,28 +2,39 @@
 
 Primarily tested and maintained for Dark Souls Remastered. Other games and file versions may gradually be supported.
 
-NOTE: some of the tools in this add-on require my additional `soulstruct_havok` Python package, which is provided
+Requires:
+    soulstruct
+    soulstruct-havok
+
+NOTE: Some of the tools in this add-on require my additional `soulstruct-havok` Python package, which is provided
 separately.
 """
 from __future__ import annotations
 
 import importlib
+import site
+import subprocess
 import sys
 import subprocess
 from importlib.metadata import distributions
 from pathlib import Path
 
-import bpy
+try:
+    import bpy
+except ModuleNotFoundError:
+    raise ModuleNotFoundError(
+        "This module requires Blender (`bpy`, etc.) to be run in order to import it. "
+        "Please ensure you are running this code inside Blender's Python environment."
+    )
 
-# Add 'modules' subdirectory to Python path. We simply bundle them with the addon.
-# Note that Blender 4.1+ finally upgraded to Python 3.11, so we deploy two versions here.
-addon_modules_path = str((Path(__file__).parent / "../io_soulstruct_lib").resolve())
-if addon_modules_path not in sys.path:
-    sys.path.append(addon_modules_path)
+# Add this directory to the Python path so that `soulstruct.blender` can be imported.
+io_soulstruct_path_str = str(Path(__file__).parent)
+if io_soulstruct_path_str not in sys.path:
+    sys.path.append(io_soulstruct_path_str)
 
-addon_modules_path_scipy = str((Path(__file__).parent / "../io_soulstruct_lib_311").resolve())
-if addon_modules_path_scipy not in sys.path:
-    sys.path.append(addon_modules_path_scipy)
+user_addon_modules = bpy.utils.user_resource("SCRIPTS", path="addons/modules")
+# Make sure editable `soulstruct` and `soulstruct-havok` modules are found.
+site.addsitedir(user_addon_modules)
 
 def have_command(command: str):
     return subprocess.run(
@@ -32,11 +43,65 @@ def have_command(command: str):
         stderr=subprocess.PIPE,
     ).returncode
 
-def try_reload(_module_name: str):
+def _ensure_soulstruct_installed():
+    """Check that required modules are available."""
+
     try:
-        importlib.reload(sys.modules[_module_name])
-    except (KeyError, ImportError):
-        pass
+        import soulstruct.base
+        import soulstruct.havok
+    except ImportError as ex:
+        # Reintall below.
+        print(f"Import error: {ex}")
+        print(
+            "Could not detect `soulstruct` and/or `soulstruct-havok` modules in Blender's Python environment. "
+            "Will reinstall now to user 'modules' folder."
+        )
+    else:
+        return
+
+    # Install editable `soulstruct` and `soulstruct-havok` modules into Python environment from `io_soulstruct_lib`.
+    io_soulstruct_lib_path = (Path(__file__).parent / "../io_soulstruct_lib").resolve()
+
+    if not io_soulstruct_lib_path.is_dir():
+        raise ImportError(
+            f"Cannot find `io_soulstruct_lib` directory at {io_soulstruct_lib_path} to install `soulstruct`. "
+            "Please ensure that the add-on is installed correctly."
+        )
+
+    print("Pip-installing editable `soulstruct` and `soulstruct-havok` modules into Blender's Python environment...")
+
+    try:
+        subprocess.run(
+            [
+                sys.executable, "-m", "pip", "install",
+                "-e", f"{io_soulstruct_lib_path}/soulstruct",
+                "-e", f"{io_soulstruct_lib_path}/soulstruct-havok",
+                "--target", user_addon_modules,
+            ],
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+    except subprocess.CalledProcessError as ex:
+        print(ex.stdout)
+        print(ex.stderr)
+        raise ImportError(f"Failed to install `soulstruct` and/or `soulstruct-havok` modules. Error: {ex}") from ex
+
+    print("Installed `soulstruct` and `soulstruct-havok` modules into Blender's Python environment.")
+
+    # Find editable installs.
+    site.addsitedir(user_addon_modules)
+
+    try:
+        import soulstruct.base
+        import soulstruct.havok
+    except ImportError as ex:
+        raise ImportError(
+            "Required modules 'soulstruct' and 'soulstruct-havok' could not be imported, even after attempted install. "
+            "Please ensure they are installed in Blender's Python environment (in user's local `modules`)."
+        ) from ex
+
+
+_ensure_soulstruct_installed()
 
 wine = have_command("wine")
 zugbruecke = any("zugbruecke" in p.name for p in distributions())
@@ -46,36 +111,37 @@ wenv = any("wenv" in p.name for p in distributions())
 # NOTE: This is IMPORTANT when using 'Reload Scripts' in Blender, as it is otherwise prone to partial re-imports of
 # Soulstruct that duplicate classes and cause wild bugs with `isinstance`, object ID equality, etc.
 
-# TODO: `soulstruct` reload doesn't seem to be complete; `Vector has no attribute 'ndim'` appears.
-# for module_name in list(sys.modules.keys()):
-#     if "io_soulstruct" not in module_name and "soulstruct" in module_name.split(".")[0]:
-#         try_reload(module_name)
+def _try_reload(_module_name: str):
+    try:
+        importlib.reload(sys.modules[_module_name])
+    except (KeyError, ImportError):
+        pass
+
 
 for module_name in list(sys.modules.keys()):
-    if module_name != "io_soulstruct" and "io_soulstruct" in module_name.split(".")[0]:  # don't reload THIS module
-        try_reload(module_name)
+    if "soulstruct.blender" in module_name:
+        _try_reload(module_name)
 
-import io_soulstruct._logging
 
-from io_soulstruct.general import *
-from io_soulstruct.misc import *
+from soulstruct.blender.general import *
+from soulstruct.blender.misc import *
 
-from io_soulstruct.animation import *
-from io_soulstruct.collision import *
-from io_soulstruct.cutscene import *
-from io_soulstruct.flver import *
-from io_soulstruct.msb import *
-from io_soulstruct.nav_graph import *
-from io_soulstruct.navmesh import *
-from io_soulstruct.types import SoulstructType, SoulstructCollectionType
-from io_soulstruct.utilities import ViewSelectedAtDistanceZero
+from soulstruct.blender.animation import *
+from soulstruct.blender.collision import *
+from soulstruct.blender.cutscene import *
+from soulstruct.blender.flver import *
+from soulstruct.blender.msb import *
+from soulstruct.blender.nav_graph import *
+from soulstruct.blender.navmesh import *
+from soulstruct.blender.types import SoulstructType, SoulstructCollectionType
+from soulstruct.blender.utilities import ViewSelectedAtDistanceZero
 
 
 bl_info = {
     "name": "Soulstruct",
     "author": "Scott Mooney (Grimrukh)",
-    "version": (2, 4, 0),
-    "blender": (4, 3, 0),
+    "version": (2, 5, 0),  # SOURCE OF TRUTH
+    "blender": (4, 5, 0),
     "location": "File > Import-Export",
     "description": "Import, manipulate, and export FromSoftware/Havok assets",
     "warning": "",
